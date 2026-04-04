@@ -13,6 +13,49 @@ build_mode="quiet"
 run_firmware=0
 run_rebuild=0
 SUDO_KEEPALIVE_PID=""
+SPINNER_PID=""
+SPINNER_MSG=""
+
+cleanup() {
+  if [ -n "${SPINNER_PID:-}" ]; then
+    kill "$SPINNER_PID" >/dev/null 2>&1 || true
+    wait "$SPINNER_PID" 2>/dev/null || true
+    SPINNER_PID=""
+  fi
+  if [ -n "${SUDO_KEEPALIVE_PID:-}" ]; then
+    kill "$SUDO_KEEPALIVE_PID" >/dev/null 2>&1 || true
+    wait "$SUDO_KEEPALIVE_PID" 2>/dev/null || true
+    SUDO_KEEPALIVE_PID=""
+  fi
+}
+trap cleanup EXIT INT TERM
+
+start_spinner() {
+  local msg="${1:-Working...}"
+  stop_spinner || true
+  SPINNER_MSG="$msg"
+
+  (
+    chars='|/-\'
+    i=0
+    while true; do
+      c="${chars:i%4:1}"
+      printf '\r[%s] %s' "$c" "$msg"
+      i=$((i + 1))
+      sleep 0.12
+    done
+  ) &
+  SPINNER_PID="$!"
+}
+
+stop_spinner() {
+  if [ -n "${SPINNER_PID:-}" ]; then
+    kill "$SPINNER_PID" >/dev/null 2>&1 || true
+    wait "$SPINNER_PID" 2>/dev/null || true
+    SPINNER_PID=""
+    printf '\r\033[2K'
+  fi
+}
 
 while [ "$#" -gt 0 ]; do
   case "$1" in
@@ -39,13 +82,6 @@ while [ "$#" -gt 0 ]; do
   esac
   shift
 done
-
-cleanup() {
-  if [ -n "${SUDO_KEEPALIVE_PID:-}" ]; then
-    kill "$SUDO_KEEPALIVE_PID" >/dev/null 2>&1 || true
-  fi
-}
-trap cleanup EXIT INT TERM
 
 run_firmware_updates() {
   if ! command -v fwupdmgr >/dev/null 2>&1; then
@@ -138,13 +174,17 @@ else
   echo "[INFO] Quiet mode enabled. Live build output is hidden."
   echo "[INFO] Writing full build log to: $build_log"
 
+  start_spinner "Rebuilding NixOS for $runtime_host..."
+
   if ! nh os switch -u -H "$runtime_host" . >"$build_log" 2>&1; then
+    stop_spinner
     echo "[ERROR] Rebuild failed. Showing last 120 lines:"
     tail -n 120 "$build_log" || true
     echo "[ERROR] Full log kept at: $build_log"
     exit 1
   fi
 
+  stop_spinner
   echo "[INFO] Rebuild completed successfully."
   rm -f "$build_log"
 fi
