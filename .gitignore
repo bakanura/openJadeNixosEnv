@@ -1,0 +1,16 @@
+# Local build outputs / symlinks
+result
+result-*
+modules/result
+
+# Local downloaded/proprietary blobs
+displaylink-file
+displaylink-*.zip
+
+# Installer runtime state (generated per machine)
+hosts/*/.installer-state.json
+hosts/*/.nhl-enrolled
+
+# Python cache / bytecode
+__pycache__/
+*.pyc

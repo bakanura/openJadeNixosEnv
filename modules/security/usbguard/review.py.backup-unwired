@@ -1,0 +1,1278 @@
+#!/usr/bin/env python3
+
+import html
+import hashlib
+import json
+import os
+import re
+import subprocess
+import sys
+import time
+from pathlib import Path
+
+
+DEVICE_RE = re.compile(r"^(\d+):\s+(\w+)\s+(.*)$")
+FIELD_RE = re.compile(r'([a-z-]+)\s+((?:\{[^}]*\})|"(?:[^"\\]|\\.)*"|\S+)')
+GTK_MODULES = None
+LSUSB_CACHE = {}
+LSUSB_CACHE_TTL_SECONDS = float(os.environ.get("USBGUARD_LSUSB_CACHE_TTL_SECONDS", "10"))
+PORT_PROMPT_COOLDOWN_SECONDS = float(os.environ.get("USBGUARD_PORT_PROMPT_COOLDOWN_SECONDS", "15"))
+MAX_BLOCKED_SCAN = int(os.environ.get("USBGUARD_MAX_BLOCKED_SCAN", "64"))
+MAX_PROMPTS_PER_CYCLE = int(os.environ.get("USBGUARD_MAX_PROMPTS_PER_CYCLE", "1"))
+PROMPT_COOLDOWN_SECONDS = float(os.environ.get("USBGUARD_PROMPT_COOLDOWN_SECONDS", "2"))
+LSUSB_TIMEOUT_SECONDS = float(os.environ.get("USBGUARD_LSUSB_TIMEOUT_SECONDS", "2.5"))
+QUEUE_POLL_SECONDS = float(os.environ.get("USBGUARD_QUEUE_POLL_SECONDS", "5"))
+QUEUE_DORMANT_BACKLOG = int(os.environ.get("USBGUARD_QUEUE_DORMANT_BACKLOG", "8"))
+QUEUE_DORMANT_SLEEP_SECONDS = float(os.environ.get("USBGUARD_QUEUE_DORMANT_SLEEP_SECONDS", "10"))
+
+GENERIC_NAME_PATTERNS = [
+    "simple hid",
+    "usb input device",
+    "usb keyboard",
+    "usb mouse",
+    "composite device",
+    "billboard",
+    "unknown",
+]
+
+INTERFACE_LABELS = {
+    "01:01:00": "audio control",
+    "01:02:00": "audio streaming",
+    "02:06:00": "ethernet/network adapter",
+    "03:00:00": "generic HID",
+    "03:01:00": "generic HID boot device",
+    "03:01:01": "keyboard",
+    "03:01:02": "mouse",
+    "08:06:50": "mass storage / card reader",
+    "09:00:00": "USB hub",
+    "09:00:01": "USB hub (single TT)",
+    "09:00:02": "USB hub (multi TT)",
+    "0a:00:00": "CDC data / network support",
+    "0e:01:00": "video control",
+    "0e:02:00": "video streaming",
+    "11:00:00": "billboard / alternate mode helper",
+    "e0:01:01": "bluetooth radio",
+    "ff:00:00": "vendor specific",
+    "ff:ff:00": "vendor specific",
+}
+TRANSLATION_CACHE = {}
+
+
+def run(*args: str, check: bool = True, timeout: float = 8.0) -> str:
+    result = subprocess.run(args, capture_output=True, text=True, timeout=timeout)
+    if check and result.returncode != 0:
+        raise RuntimeError(result.stderr.strip() or "command failed")
+    return result.stdout
+
+
+def translate_texts(texts):
+    if os.environ.get("CUSTOM_UI_TRANSLATION_ENABLE", "0") != "1":
+        return texts
+
+    translate_bin = os.environ.get("CUSTOM_UI_TRANSLATE_BIN", "custom-ui-translate").strip()
+    if not translate_bin:
+        return texts
+
+    results = []
+    missing = []
+    for text in texts:
+        cached = TRANSLATION_CACHE.get(text)
+        if cached is None:
+            missing.append(text)
+        results.append(cached)
+
+    if missing:
+        try:
+            proc = subprocess.run(
+                [translate_bin, "--json"],
+                input=json.dumps(missing, ensure_ascii=False),
+                capture_output=True,
+                text=True,
+                check=True,
+            )
+            translated_missing = json.loads(proc.stdout)
+            if len(translated_missing) != len(missing):
+                translated_missing = missing
+        except Exception:
+            translated_missing = missing
+
+        for original, translated in zip(missing, translated_missing):
+            TRANSLATION_CACHE[original] = translated
+
+    return [TRANSLATION_CACHE.get(text, text) for text in texts]
+
+
+def tr(text: str) -> str:
+    return translate_texts([text])[0]
+
+
+def env_flag(name: str, default: str = "0") -> bool:
+    return os.environ.get(name, default).strip().lower() in {"1", "true", "yes", "on"}
+
+
+def gtk_modules():
+    global GTK_MODULES
+    if GTK_MODULES is not None:
+        return GTK_MODULES
+
+    try:
+        import gi
+
+        gi.require_version("Gtk", "3.0")
+        from gi.repository import GLib, Gtk, Pango
+
+        GTK_MODULES = (Gtk, Pango, GLib)
+        return GTK_MODULES
+    except Exception:
+        GTK_MODULES = (None, None, None)
+        return GTK_MODULES
+
+
+def can_use_gtk(popups: bool, display: str) -> bool:
+    if not (popups and display):
+        return False
+    Gtk, _, _ = gtk_modules()
+    return Gtk is not None
+
+
+def blocked_id_set():
+    return {str(device.get("id", "")) for device in blocked_devices()}
+
+
+def is_device_still_present(device) -> bool:
+    port = via_port(device)
+    if not port:
+        return True
+    return (Path("/sys/bus/usb/devices") / port).exists()
+
+
+def is_device_still_blocked(device) -> bool:
+    device_id = str(device.get("id", ""))
+    if not device_id:
+        return False
+    if not is_device_still_present(device):
+        return False
+    return str(device_id) in blocked_id_set()
+
+
+def via_port(device):
+    return (device.get("via-port") or "").strip()
+
+
+def root_port_token(device):
+    port = via_port(device)
+    if "-" not in port:
+        return ""
+    suffix = port.split("-", 1)[1]
+    return suffix.split(".", 1)[0]
+
+
+def parse_rule_line(line: str):
+    match = DEVICE_RE.match(line.strip())
+    if not match:
+        return None
+
+    device_id, action, remainder = match.groups()
+    fields = {}
+    for key, value in FIELD_RE.findall(remainder):
+        if value.startswith('"') and value.endswith('"'):
+            value = value[1:-1]
+        fields[key] = value
+
+    usb_id = fields.get("id", "")
+
+    interfaces_value = fields.get("with-interface", "")
+    interfaces = []
+    if interfaces_value.startswith("{") and interfaces_value.endswith("}"):
+        interfaces = [item for item in interfaces_value[1:-1].split() if item]
+    elif interfaces_value:
+        interfaces = [interfaces_value]
+
+    fields["interfaces"] = interfaces
+    fields["id"] = device_id
+    fields["usb_id"] = usb_id
+    fields["action"] = action
+    fields["rule"] = remainder
+    return fields
+
+
+def decode_interfaces(interfaces):
+    labels = []
+    for code in interfaces:
+        label = INTERFACE_LABELS.get(code)
+        labels.append(f"{code}: {label}" if label else code)
+    return labels
+
+
+def suspicious_notes(device, verbose_text, lsusb_line=""):
+    notes = []
+    name = (device.get("name") or "").strip().lower()
+    descriptor = f"{name} {lsusb_line}".strip().lower()
+    serial = (device.get("serial") or "").strip()
+    connect_type = (device.get("with-connect-type") or "").strip().lower()
+    interfaces = device.get("interfaces", [])
+    hid_interfaces = [code for code in interfaces if code.startswith("03:")]
+    audio_interfaces = [code for code in interfaces if code.startswith("01:")]
+    hub_interfaces = [code for code in interfaces if code.startswith("09:")]
+    video_interfaces = [code for code in interfaces if code.startswith("0e:")]
+
+    if not descriptor or any(pattern in descriptor for pattern in GENERIC_NAME_PATTERNS):
+        notes.append(tr("Name looks generic or underspecified."))
+    if not serial:
+        notes.append(tr("No serial exposed by the device."))
+    if connect_type in {"unknown", "hotplug"}:
+        notes.append(tr(f"Connect type is reported as {connect_type or 'unknown'}, so treat it as an external device."))
+    if hid_interfaces:
+        notes.append(tr("Device exposes HID interfaces and could inject input if approved."))
+    if any(code == "03:01:01" for code in hid_interfaces):
+        notes.append(tr("Claims a keyboard interface, which is rubber-ducky territory if unexpected."))
+    if hid_interfaces.count("03:00:00") >= 2:
+        notes.append(tr("Exposes multiple generic HID interfaces; media dongles sometimes use this for consumer-control buttons."))
+    if audio_interfaces and hid_interfaces:
+        notes.append(tr("Audio + HID combo device detected; this can behave like a headset dongle with media or power-style buttons."))
+    if any(code == "02:06:00" or code.startswith("0a:") for code in interfaces):
+        notes.append(tr("Exposes network-related interfaces."))
+    if any(code.startswith("08:") for code in interfaces):
+        notes.append(tr("Exposes mass-storage style interfaces."))
+    if "billboard" in descriptor:
+        notes.append(tr("Billboard devices are usually docking/alt-mode helpers, but the name is still generic."))
+    if hub_interfaces:
+        notes.append(tr("Exposes hub functionality, which is common for docks and multi-function adapters."))
+    if looks_like_dock_device(descriptor, {
+        "has_hub": bool(hub_interfaces),
+        "has_network": any(code == "02:06:00" or code.startswith("0a:") for code in interfaces),
+        "has_storage": any(code.startswith("08:") for code in interfaces),
+        "has_video": bool(video_interfaces),
+        "is_billboard": "billboard" in descriptor,
+    }):
+        notes.append(tr("This may be part of a dock or USB-C expansion chain; blocking it can affect charging, displays, Ethernet, audio, or card readers."))
+    if video_interfaces:
+        notes.append(tr("Exposes video-related interfaces, which is common for webcams or dock display chains."))
+    if "shokz" in name:
+        notes.append(tr("Known headset/dongle pattern: after authorization this model family may expose consumer-control input events."))
+    if "imanufacturer" in verbose_text.lower() and "0 " in verbose_text.lower():
+        notes.append(tr("lsusb reports missing string descriptors for at least one field."))
+    return notes
+
+
+def looks_like_dock_device(name: str, flags) -> bool:
+    lowered = (name or "").lower()
+    explicit_dock_markers = (
+        "dock",
+        "docking",
+        "billboard",
+        "parade",
+        "genesys",
+        "displaylink",
+        "ethernet",
+        "card reader",
+        "rtl8153",
+    )
+    obvious_non_dock_markers = (
+        "bluetooth",
+        "fingerprint",
+        "webcam",
+        "camera",
+        "headset",
+        "charging mode",
+        "charging cable",
+        "usb-c extension",
+        "usb c extension",
+        "extension cable",
+        "shokz",
+        "dongle",
+        "receiver",
+        "adapter",
+        "extender",
+        "loop",
+    )
+
+    if any(marker in lowered for marker in obvious_non_dock_markers) and not any(
+        marker in lowered for marker in explicit_dock_markers
+    ):
+        return False
+
+    if flags["has_hub"] and not any((flags["has_network"], flags["has_storage"], flags["has_video"], flags["is_billboard"])):
+        return False
+
+    if flags["is_billboard"]:
+        return True
+
+    if any(marker in lowered for marker in explicit_dock_markers):
+        return True
+
+    rich_functions = sum(
+        1
+        for present in (
+            flags["has_network"],
+            flags["has_storage"],
+            flags["has_video"],
+        )
+        if present
+    )
+
+    if flags["has_hub"] and rich_functions >= 1:
+        return True
+
+    if rich_functions >= 2:
+        return True
+
+    return False
+
+
+def assess_device(device, verbose_text, lsusb_line=""):
+    interfaces = device.get("interfaces", [])
+    descriptor = f"{(device.get('name') or '').strip()} {lsusb_line}".strip()
+    notes = suspicious_notes(device, verbose_text, lsusb_line)
+    flags = {
+        "has_hid": any(code.startswith("03:") for code in interfaces),
+        "has_keyboard": any(code == "03:01:01" for code in interfaces),
+        "has_audio": any(code.startswith("01:") for code in interfaces),
+        "has_network": any(code == "02:06:00" or code.startswith("0a:") for code in interfaces),
+        "has_storage": any(code.startswith("08:") for code in interfaces),
+        "has_hub": any(code.startswith("09:") for code in interfaces),
+        "has_video": any(code.startswith("0e:") for code in interfaces),
+        "is_billboard": any(code.startswith("11:") for code in interfaces) or "billboard" in descriptor.lower(),
+    }
+    flags["looks_like_dock"] = looks_like_dock_device(descriptor, flags)
+
+    risk = "Low"
+    if flags["has_keyboard"]:
+        risk = "High"
+    elif flags["has_storage"] or (flags["has_audio"] and flags["has_hid"]) or flags["has_network"] or flags["has_hid"]:
+        risk = "Medium"
+    if any("power" in note.lower() for note in notes):
+        risk = "High"
+
+    return {
+        "risk": risk,
+        "notes": notes,
+        "flags": flags,
+    }
+
+
+def device_key(device):
+    base = "|".join(
+        [
+            device.get("hash", ""),
+            device.get("usb_id", ""),
+            device.get("serial", ""),
+            device.get("via-port", ""),
+        ]
+    )
+    return hashlib.sha256(base.encode()).hexdigest()
+
+
+def lsusb_text(device):
+    identifier = device.get("usb_id")
+    if not identifier:
+        return "", ""
+    now = time.monotonic()
+    cached = LSUSB_CACHE.get(identifier)
+    if cached and (now - cached["ts"] <= LSUSB_CACHE_TTL_SECONDS):
+        return cached["line"], cached["verbose"]
+
+    lsusb_line = run("lsusb", "-d", identifier, check=False, timeout=LSUSB_TIMEOUT_SECONDS).strip()
+    verbose = run("lsusb", "-v", "-d", identifier, check=False, timeout=LSUSB_TIMEOUT_SECONDS)
+    interesting = []
+    for raw_line in verbose.splitlines():
+        stripped = raw_line.strip()
+        if stripped.startswith(("idVendor", "idProduct", "bDeviceClass", "bDeviceSubClass", "bDeviceProtocol", "iManufacturer", "iProduct", "iSerial")):
+            interesting.append(stripped)
+    compact_verbose = "\n".join(interesting)
+    LSUSB_CACHE[identifier] = {"ts": now, "line": lsusb_line, "verbose": compact_verbose}
+    if len(LSUSB_CACHE) > 256:
+        stale_before = now - (LSUSB_CACHE_TTL_SECONDS * 4)
+        for key in list(LSUSB_CACHE.keys()):
+            if LSUSB_CACHE[key]["ts"] < stale_before:
+                del LSUSB_CACHE[key]
+    return lsusb_line, compact_verbose
+
+
+def parse_verbose_usb_strings(verbose_text: str):
+    values = {}
+    for key in ("iManufacturer", "iProduct", "iSerial"):
+        match = re.search(rf"^{key}\s+\d+\s+(.+)$", verbose_text, re.MULTILINE)
+        if not match:
+            values[key] = ""
+            continue
+        value = match.group(1).strip()
+        if value in {"0", "[none]", "<none>"}:
+            value = ""
+        values[key] = value
+    return values
+
+
+def looks_generic_device_name(value: str) -> bool:
+    text = (value or "").strip()
+    if not text:
+        return True
+    lowered = text.lower()
+    if re.fullmatch(r"[0-9a-f]{4}:[0-9a-f]{4}", lowered):
+        return True
+    generic_markers = (
+        "usb device",
+        "unknown usb device",
+        "usb2.0 hub",
+        "usb3.0 hub",
+        "usb hub",
+        "bluetooth radio",
+        "billboard",
+        "hub",
+        "device",
+    )
+    return lowered in generic_markers
+
+
+def combine_usb_strings(manufacturer: str, product: str) -> str:
+    manufacturer = (manufacturer or "").strip()
+    product = (product or "").strip()
+    if manufacturer and product:
+        if manufacturer.lower() in product.lower():
+            return product
+        return f"{manufacturer} {product}"
+    return product or manufacturer
+
+
+def device_display_name(device, lsusb_line="", verbose_text=""):
+    name = (device.get("name") or "").strip()
+    verbose_strings = parse_verbose_usb_strings(verbose_text or "")
+    pretty_verbose = combine_usb_strings(
+        verbose_strings.get("iManufacturer", ""),
+        verbose_strings.get("iProduct", ""),
+    )
+    if pretty_verbose and not looks_generic_device_name(pretty_verbose):
+        return pretty_verbose
+
+    line = (lsusb_line or "").strip()
+    if ": ID " in line:
+        pretty = line.split(": ID ", 1)[1]
+        parts = pretty.split(None, 1)
+        if len(parts) == 2:
+            lsusb_pretty = parts[1].strip()
+            if lsusb_pretty and not looks_generic_device_name(lsusb_pretty):
+                return lsusb_pretty
+
+    if name and not looks_generic_device_name(name):
+        return name
+
+    if pretty_verbose:
+        return pretty_verbose
+
+    if line and ": ID " in line:
+        pretty = line.split(": ID ", 1)[1]
+        parts = pretty.split(None, 1)
+        if len(parts) == 2:
+            return parts[1].strip()
+
+    if name:
+        return name
+
+    return device.get("usb_id", "Unknown USB device")
+
+
+def risk_badge_markup(risk: str) -> str:
+    normalized = (risk or "").strip().lower()
+    if normalized == "high":
+        color = "#ff6b6b"
+        label = tr("Red")
+    elif normalized == "medium":
+        color = "#f6c177"
+        label = tr("Orange")
+    else:
+        color = "#98c379"
+        label = tr("Green")
+    return (
+        f"<span foreground='{color}' weight='bold'>"
+        f"{html.escape(tr('Warning level'))}: {html.escape(label)}"
+        f"</span>"
+    )
+
+
+def render_summary(device):
+    lsusb_line, verbose = lsusb_text(device)
+    interface_lines = decode_interfaces(device.get("interfaces", []))
+    assessment = assess_device(device, verbose, lsusb_line)
+    notes = assessment["notes"]
+    flags = assessment["flags"]
+    if not notes:
+        notes = [tr("No obvious red flags from the basic heuristic summary.")]
+    risk = assessment["risk"]
+
+    interface_section = [f"  - {line}" for line in interface_lines] or ["  - <none reported>"]
+    short_hash = device.get("hash", "<unknown>")
+    short_parent_hash = device.get("parent-hash", "<unknown>")
+    if short_hash not in {"", "<unknown>"}:
+        short_hash = short_hash[:16] + "..."
+    if short_parent_hash not in {"", "<unknown>"}:
+        short_parent_hash = short_parent_hash[:16] + "..."
+
+    parts = [
+        tr("USB Device Review"),
+        "",
+        tr("Quick Summary"),
+        f"  {tr('Name')}: {device.get('name', '<unknown>')}",
+        f"  {tr('Risk')}: {risk}",
+        f"  {tr('State')}: {device.get('action', '<unknown>')}",
+        f"  {tr('Type')}: {device.get('usb_id', '<unknown>')}",
+        f"  {tr('Port')}: {device.get('via-port', '<unknown>')}",
+        f"  {tr('Connect type')}: {device.get('with-connect-type', '<unknown>')}",
+        f"  {tr('Serial')}: {device.get('serial', '<none>') or '<none>'}",
+        "",
+        tr("Why This Might Be Risky"),
+        *[f"  - {line}" for line in notes],
+        "",
+        tr("What This Device Claims To Be"),
+        *interface_section,
+        "",
+        tr("Decision Hint"),
+        f"  {tr('Approve only if you expected this exact device right now.')}",
+        f"  {tr('If this looks generic, unexpected, or too vague, keep it blocked.')}",
+        *(
+            [
+                f"  {tr('This device looks like part of a dock or USB-C hub chain.')}",
+                f"  {tr('Keeping it blocked may interrupt charging, displays, Ethernet, audio, webcams, or card readers.')}",
+                f"  {tr('If you approve this dock helper first, more child devices may appear afterward and will be reviewed separately.')}",
+            ]
+            if flags["looks_like_dock"]
+            else []
+        ),
+        "",
+        tr("Readable Details"),
+        f"  {tr('USBGuard device ID')}: {device.get('id', '<unknown>')}",
+        f"  {tr('lsusb line')}: {lsusb_line or '<no lsusb line available>'}",
+        f"  {tr('Device hash')}: {short_hash}",
+        f"  {tr('Parent hash')}: {short_parent_hash}",
+        "",
+        tr("Technical Details"),
+        f"  {tr('Interesting lsusb -v fields')}:",
+        *(["    " + line for line in verbose.splitlines()] if verbose else ["    <none>"]),
+        "",
+        f"  {tr('Raw USBGuard rule')}:",
+        f"    {device.get('rule', '<missing>')}",
+    ]
+    return "\n".join(parts)
+
+
+def banner_markup(device):
+    lsusb_line, verbose = lsusb_text(device)
+    assessment = assess_device(device, verbose, lsusb_line)
+    risk = assessment["risk"]
+    flags = assessment["flags"]
+
+    if risk == "High":
+        risk_color = "#ff6b6b"
+    elif risk == "Medium":
+        risk_color = "#f6c177"
+    else:
+        risk_color = "#98c379"
+
+    lines = [
+        f"<span foreground='{risk_color}' weight='bold' size='x-large'>{html.escape(tr('Risk'))}: {html.escape(risk)}</span>",
+    ]
+
+    if flags["has_storage"]:
+        lines.append(
+            f"<span foreground='#ff6b6b' weight='bold'>{html.escape(tr('Warning'))}: "
+            f"{html.escape(tr('This device exposes USB storage. That can include card readers or built-in driver partitions on docks.'))}</span>"
+        )
+    if flags["looks_like_dock"]:
+        lines.append(
+            f"<span foreground='#ffb86c' weight='bold'>{html.escape(tr('Charging warning'))}: "
+            f"{html.escape(tr('This looks like part of a dock or USB-C hub chain. Keeping it blocked may stop charging and can also disable displays, Ethernet, audio, webcams, or card readers.'))}</span>"
+        )
+    if flags["has_keyboard"]:
+        lines.append(
+            f"<span foreground='#ff9e64' weight='bold'>{html.escape(tr('Warning'))}: "
+            f"{html.escape(tr('This device claims a keyboard interface. Unexpected keyboards can behave like rubber duckies.'))}</span>"
+        )
+    elif flags["has_hid"]:
+        lines.append(
+            f"<span foreground='#f6c177' weight='bold'>{html.escape(tr('Caution'))}: "
+            f"{html.escape(tr('This device exposes HID input-style interfaces.'))}</span>"
+        )
+    if flags["has_network"]:
+        lines.append(
+            f"<span foreground='#7dcfff' weight='bold'>{html.escape(tr('Notice'))}: "
+            f"{html.escape(tr('This device exposes a network interface.'))}</span>"
+        )
+    if flags["is_billboard"]:
+        lines.append(
+            f"<span foreground='#c0caf5'>{html.escape(tr('Info'))}: "
+            f"{html.escape(tr('Billboard helpers are common on docks and alt-mode adapters, and can be tied to USB-C charging/display behavior.'))}</span>"
+        )
+
+    name = device.get("name", "<unknown>")
+    usb_id = device.get("usb_id", "<unknown>")
+    lines.append(
+        f"<span weight='bold'>{html.escape(name)}</span> <span foreground='#bbbbbb'>({html.escape(usb_id)})</span>"
+    )
+    return "\n".join(lines)
+
+
+def dock_group(devices, anchor):
+    anchor_lsusb_line, anchor_verbose = lsusb_text(anchor)
+    anchor_assessment = assess_device(anchor, anchor_verbose, anchor_lsusb_line)
+    if not anchor_assessment["flags"]["looks_like_dock"] or anchor_assessment["flags"]["has_storage"]:
+        return [anchor]
+
+    token = root_port_token(anchor)
+    if not token:
+        return [anchor]
+
+    grouped = []
+    for candidate in devices:
+        candidate_lsusb_line, candidate_verbose = lsusb_text(candidate)
+        candidate_assessment = assess_device(candidate, candidate_verbose, candidate_lsusb_line)
+        if root_port_token(candidate) == token and (
+            not candidate_assessment["flags"]["has_storage"]
+            and (
+                candidate_assessment["flags"]["looks_like_dock"]
+                or candidate_assessment["flags"]["has_network"]
+                or candidate_assessment["flags"]["has_video"]
+                or candidate_assessment["flags"]["has_hub"]
+            )
+        ):
+            grouped.append(candidate)
+
+    return grouped or [anchor]
+
+
+def repo_note(device, trusted_rules):
+    trusted = trusted_rules.get(device.get("rule"))
+    title_name = device.get("name") or device.get("usb_id") or "Unknown USB device"
+    if trusted:
+        return (
+            trusted,
+            f"\n\nRepo note: this rule already exists in whitelist.json as {trusted.get('label', title_name)}.",
+        )
+    return None, "\n\nRepo note: this device is not present in whitelist.json."
+
+
+def render_group_summary(devices, trusted_rules):
+    lines = [
+        tr("USB Dock / Hub Group Review"),
+        "",
+        tr("Quick Summary"),
+        f"  {tr('Count')}: {len(devices)}",
+        f"  {tr('Hint')}: {tr('Tick only the subdevices you actually expect from this dock or adapter.')}",
+        "",
+        tr("Subdevices"),
+    ]
+
+    for device in devices:
+        lsusb_line, verbose = lsusb_text(device)
+        assessment = assess_device(device, verbose, lsusb_line)
+        claims = ", ".join(decode_interfaces(device.get("interfaces", []))[:3]) or tr("<none>")
+        _, note = repo_note(device, trusted_rules)
+        note_line = note.replace("\n\n", "").replace("Repo note: ", "")
+        lines.extend(
+            [
+                f"  [{device.get('id', '?')}] {device.get('name') or device.get('usb_id') or tr('Unknown USB device')}",
+                f"    {tr('Type')}: {device.get('usb_id', '<unknown>')}",
+                f"    {tr('Port')}: {via_port(device) or '<unknown>'}",
+                f"    {tr('Risk')}: {assessment['risk']}",
+                f"    {tr('Claims')}: {claims}",
+                f"    {tr('Repo note')}: {note_line}",
+            ]
+        )
+
+    lines.extend(
+        [
+            "",
+            tr("Decision Hint"),
+            f"  {tr('Approve only the pieces you recognize and need right now.')}",
+            f"  {tr('Dock chains often include hubs, ethernet, storage, billboard helpers, card readers, and audio devices.')}",
+            f"  {tr('Leaving an important dock helper blocked can interrupt charging, displays, or networking.')}",
+            f"  {tr('Storage-capable subdevices are intentionally reviewed later in the stronger standalone warning flow.')}",
+        ]
+    )
+
+    return "\n".join(lines)
+
+
+def approve(device, permanent: bool = False):
+    if permanent:
+        current_rule = device.get("rule", "")
+        allow_rule = re.sub(r"^\w+\s+", "allow ", current_rule, count=1)
+        run("usbguard", "append-rule", allow_rule)
+    run("usbguard", "allow-device", device["id"])
+
+
+def confirm_permanent(title: str, device_name: str, risk: str = "Low") -> bool:
+    display = os.environ.get("DISPLAY") or os.environ.get("WAYLAND_DISPLAY")
+    popups = os.environ.get("USBGUARD_REVIEW_POPUPS", "0") == "1"
+    message = (
+        tr("Permanent approval means future appearances of this device will be allowed automatically until the next rebuild resets the runtime whitelist and regenerates built-in device rules.")
+        + "\n\n"
+        + f"{tr('Device')}: {device_name}\n\n"
+        + tr("Do you really want to enable this permanently until rebuild?")
+    )
+
+    if can_use_gtk(popups, display):
+        return confirm_permanent_gtk(None, device_name, risk)
+
+    print(message)
+    response = input(f"{tr('Enable permanently until rebuild?')} [y/N] ").strip().lower()
+    return response in {"y", "yes"}
+
+
+def confirm_group_permanent(title: str, count: int) -> bool:
+    return confirm_permanent(title, tr(f"{count} selected dock device(s)"), "Medium")
+
+
+def confirm_permanent_gtk(parent, device_name: str, risk: str = "Low") -> bool:
+    Gtk, _, _ = gtk_modules()
+    if Gtk is None:
+        return False
+
+    primary = tr("Enable this device permanently until rebuild?")
+    secondary = (
+        tr("Permanent approval means future appearances of this device will be allowed automatically until the next rebuild resets the runtime whitelist and regenerates built-in device rules.")
+        + "\n\n"
+        + f"{tr('Device')}: {device_name}"
+    )
+
+    dialog = Gtk.Dialog(
+        title=tr("Confirm permanent approval"),
+        transient_for=parent,
+        flags=Gtk.DialogFlags.MODAL | Gtk.DialogFlags.DESTROY_WITH_PARENT,
+    )
+    dialog.set_keep_above(True)
+    dialog.set_modal(True)
+    dialog.set_default_size(360, 120)
+    dialog.set_resizable(False)
+    content = dialog.get_content_area()
+    content.set_spacing(10)
+
+    primary_label = Gtk.Label(label=primary)
+    primary_label.set_xalign(0.0)
+    primary_label.set_line_wrap(True)
+    content.pack_start(primary_label, False, False, 0)
+
+    risk_label = Gtk.Label()
+    risk_label.set_use_markup(True)
+    risk_label.set_markup(risk_badge_markup(risk))
+    risk_label.set_xalign(0.0)
+    content.pack_start(risk_label, False, False, 0)
+
+    device_label = Gtk.Label(label=f"{tr('Device')}: {device_name}")
+    device_label.set_xalign(0.0)
+    device_label.set_line_wrap(True)
+    content.pack_start(device_label, False, False, 0)
+
+    secondary_label = Gtk.Label(label=tr("This stays allowed until the next rebuild resets the runtime whitelist and built-in device rules."))
+    secondary_label.set_xalign(0.0)
+    secondary_label.set_line_wrap(True)
+    content.pack_start(secondary_label, False, False, 0)
+
+    dialog.add_button(tr("No, go back"), Gtk.ResponseType.CANCEL)
+    dialog.add_button(tr("Yes, enable until rebuild"), Gtk.ResponseType.OK)
+    dialog.set_default_response(Gtk.ResponseType.NONE)
+    dialog.show_all()
+
+    # Prevent the mouse release that opened the child confirmation from
+    # immediately activating one of its buttons.
+    while Gtk.events_pending():
+        Gtk.main_iteration_do(False)
+
+    response = dialog.run()
+    dialog.destroy()
+    return response == Gtk.ResponseType.OK
+
+
+def show_selection_required_gtk(parent):
+    Gtk, _, _ = gtk_modules()
+    if Gtk is None:
+        return
+
+    dialog = Gtk.MessageDialog(
+        transient_for=parent,
+        flags=Gtk.DialogFlags.MODAL | Gtk.DialogFlags.DESTROY_WITH_PARENT,
+        message_type=Gtk.MessageType.WARNING,
+        buttons=Gtk.ButtonsType.OK,
+        text=tr("Select at least one subdevice first."),
+    )
+    dialog.set_title(tr("Nothing selected"))
+    dialog.set_keep_above(True)
+    dialog.run()
+    dialog.destroy()
+
+
+def prompt_gtk(device, summary: str, title: str, banner: str) -> str:
+    Gtk, Pango, GLib = gtk_modules()
+    if Gtk is None:
+        return "deny"
+
+    result = {"decision": "deny"}
+    dialog = Gtk.Dialog(title=title, flags=Gtk.DialogFlags.MODAL)
+    dialog.set_default_size(960, 760)
+    dialog.set_keep_above(True)
+    dialog.set_border_width(12)
+    dialog.set_modal(True)
+    root = dialog.get_content_area()
+    root.set_spacing(10)
+
+    banner_label = Gtk.Label()
+    banner_label.set_use_markup(True)
+    banner_label.set_markup(banner)
+    banner_label.set_line_wrap(True)
+    banner_label.set_xalign(0.0)
+    root.pack_start(banner_label, False, False, 0)
+
+    scroller = Gtk.ScrolledWindow()
+    scroller.set_policy(Gtk.PolicyType.AUTOMATIC, Gtk.PolicyType.AUTOMATIC)
+    scroller.set_hexpand(True)
+    scroller.set_vexpand(True)
+    root.pack_start(scroller, True, True, 0)
+
+    text_view = Gtk.TextView()
+    text_view.set_editable(False)
+    text_view.set_cursor_visible(False)
+    text_view.set_wrap_mode(Gtk.WrapMode.NONE)
+    text_view.modify_font(Pango.FontDescription("monospace 10"))
+    text_view.get_buffer().set_text(summary)
+    scroller.add(text_view)
+
+    buttons = Gtk.ButtonBox(orientation=Gtk.Orientation.HORIZONTAL)
+    buttons.set_layout(Gtk.ButtonBoxStyle.END)
+    buttons.set_spacing(8)
+    root.pack_start(buttons, False, False, 0)
+
+    def finish(decision: str):
+        result["decision"] = decision
+        dialog.response(Gtk.ResponseType.NONE)
+
+    once_button = Gtk.Button(label=tr("Approve once"))
+    once_button.connect("clicked", lambda *_: finish("approve-once"))
+    buttons.add(once_button)
+
+    permanent_button = Gtk.Button(label=tr("Approve permanently"))
+
+    def on_permanent(*_args):
+        lsusb_line, verbose = lsusb_text(device)
+        assessment = assess_device(device, verbose, lsusb_line)
+        pretty_name = device_display_name(device, lsusb_line, verbose)
+        if confirm_permanent_gtk(dialog, pretty_name, assessment["risk"]):
+            finish("approve-permanently")
+
+    permanent_button.connect("clicked", on_permanent)
+    buttons.add(permanent_button)
+
+    deny_button = Gtk.Button(label=tr("Keep blocked"))
+    deny_button.connect("clicked", lambda *_: finish("deny"))
+    buttons.add(deny_button)
+
+    def auto_close_if_gone():
+        if result["decision"] != "deny":
+            return False
+        if not is_device_still_blocked(device):
+            finish("deny")
+            return False
+        return True
+
+    if GLib is not None:
+        GLib.timeout_add_seconds(1, auto_close_if_gone)
+
+    dialog.connect("delete-event", lambda *_args: finish("deny") or False)
+    dialog.show_all()
+    dialog.run()
+    dialog.destroy()
+    return result["decision"]
+
+
+def prompt_dock_group_gtk(devices, title: str):
+    Gtk, _, GLib = gtk_modules()
+    if Gtk is None:
+        return "deny", []
+
+    result = {"decision": "deny", "selected_ids": []}
+    group_ids = {str(device.get("id", "")) for device in devices if str(device.get("id", "")).strip()}
+    dialog = Gtk.Dialog(title=title, flags=Gtk.DialogFlags.MODAL)
+    dialog.set_default_size(980, 460)
+    dialog.set_keep_above(True)
+    dialog.set_border_width(12)
+    dialog.set_modal(True)
+    root = dialog.get_content_area()
+    root.set_spacing(10)
+
+    intro = Gtk.Label(
+        label=tr("This dock or USB-C hub exposes multiple subdevices. Tick the ones you want to allow and leave the rest blocked.")
+    )
+    intro.set_line_wrap(True)
+    intro.set_xalign(0.0)
+    root.pack_start(intro, False, False, 0)
+
+    columns = [
+        tr("Allow"),
+        "id",
+        tr("Name"),
+        tr("Type"),
+        tr("Port"),
+        tr("Risk"),
+        tr("Claims"),
+    ]
+    store = Gtk.ListStore(bool, str, str, str, str, str, str)
+    for device in devices:
+        lsusb_line, verbose = lsusb_text(device)
+        assessment = assess_device(device, verbose, lsusb_line)
+        pretty_name = device_display_name(device, lsusb_line, verbose)
+        interfaces = ", ".join(decode_interfaces(device.get("interfaces", []))[:2]) or tr("<none>")
+        store.append(
+            [
+                True,
+                str(device.get("id", "")),
+                pretty_name or device.get("usb_id") or tr("Unknown USB device"),
+                device.get("usb_id", "<unknown>"),
+                via_port(device) or "<unknown>",
+                assessment["risk"],
+                interfaces,
+            ]
+        )
+
+    tree = Gtk.TreeView(model=store)
+    tree.set_headers_visible(True)
+
+    toggle = Gtk.CellRendererToggle()
+
+    def on_toggle(_renderer, path):
+        store[path][0] = not store[path][0]
+
+    toggle.connect("toggled", on_toggle)
+    tree.append_column(Gtk.TreeViewColumn(columns[0], toggle, active=0))
+
+    for index, label in enumerate(columns[2:], start=2):
+        renderer = Gtk.CellRendererText()
+        renderer.set_property("ellipsize", Pango.EllipsizeMode.END)
+        column = Gtk.TreeViewColumn(label, renderer, text=index)
+        column.set_resizable(True)
+        tree.append_column(column)
+
+    scroller = Gtk.ScrolledWindow()
+    scroller.set_policy(Gtk.PolicyType.AUTOMATIC, Gtk.PolicyType.AUTOMATIC)
+    scroller.set_hexpand(True)
+    scroller.set_vexpand(True)
+    scroller.add(tree)
+    root.pack_start(scroller, True, True, 0)
+
+    buttons = Gtk.ButtonBox(orientation=Gtk.Orientation.HORIZONTAL)
+    buttons.set_layout(Gtk.ButtonBoxStyle.END)
+    buttons.set_spacing(8)
+    root.pack_start(buttons, False, False, 0)
+
+    def current_selection():
+        return [row[1] for row in store if row[0]]
+
+    def finish(decision: str):
+        result["decision"] = decision
+        result["selected_ids"] = current_selection()
+        dialog.response(Gtk.ResponseType.NONE)
+
+    once_button = Gtk.Button(label=tr("Approve selected once"))
+
+    def on_once(*_args):
+        if not current_selection():
+            show_selection_required_gtk(dialog)
+            return
+        finish("approve-once")
+
+    once_button.connect("clicked", on_once)
+    buttons.add(once_button)
+
+    permanent_button = Gtk.Button(label=tr("Approve selected permanently"))
+
+    def on_group_permanent(*_args):
+        selected = current_selection()
+        if not selected:
+            show_selection_required_gtk(dialog)
+            return
+        if confirm_permanent_gtk(dialog, tr(f"{len(selected)} selected dock device(s)")):
+            finish("approve-permanently")
+
+    permanent_button.connect("clicked", on_group_permanent)
+    buttons.add(permanent_button)
+
+    deny_button = Gtk.Button(label=tr("Keep all blocked"))
+    deny_button.connect("clicked", lambda *_: finish("deny"))
+    buttons.add(deny_button)
+
+    def auto_close_if_group_gone():
+        if result["decision"] != "deny":
+            return False
+        blocked = blocked_id_set()
+        any_present = any(is_device_still_present(device) for device in devices)
+        if (group_ids and not (group_ids & blocked)) or (not any_present):
+            finish("deny")
+            return False
+        return True
+
+    if GLib is not None:
+        GLib.timeout_add_seconds(1, auto_close_if_group_gone)
+
+    dialog.connect("delete-event", lambda *_args: finish("deny") or False)
+    dialog.show_all()
+    dialog.run()
+    dialog.destroy()
+    return result["decision"], result["selected_ids"]
+
+
+def prompt(device, summary: str, title: str, banner: str) -> str:
+    popups = os.environ.get("USBGUARD_REVIEW_POPUPS", "0") == "1"
+    display = os.environ.get("DISPLAY") or os.environ.get("WAYLAND_DISPLAY")
+    lsusb_line, verbose = lsusb_text(device)
+    pretty_name = device_display_name(device, lsusb_line, verbose)
+    assessment = assess_device(device, verbose, lsusb_line)
+    if can_use_gtk(popups, display):
+        return prompt_gtk(device, summary, title, banner)
+
+    print(summary)
+    print()
+    response = input(f"{tr('Approve this device?')} [o]{tr('nce')} / [p]{tr('ermanent')} / [N]{tr('o')} ").strip().lower()
+    if response in {"o", "once", "y", "yes"}:
+        return "approve-once"
+    if response in {"p", "permanent"}:
+        if confirm_permanent(title, pretty_name or "Unknown USB device", assessment["risk"]):
+            return "approve-permanently"
+    return "deny"
+
+
+def prompt_dock_group(devices, title: str):
+    popups = os.environ.get("USBGUARD_REVIEW_POPUPS", "0") == "1"
+    display = os.environ.get("DISPLAY") or os.environ.get("WAYLAND_DISPLAY")
+    if can_use_gtk(popups, display):
+        return prompt_dock_group_gtk(devices, title)
+
+    print(tr("Dock group review:"))
+    for device in devices:
+        print(f"  [{device.get('id')}] {device.get('name') or device.get('usb_id')} @ {via_port(device)}")
+    print()
+    response = input(tr("Enter USBGuard IDs to approve, separated by spaces, or press Enter to keep all blocked: ")).strip()
+    if not response:
+        return "deny", []
+    selected_ids = response.split()
+    mode = input(tr("Approve selected [o]nce / [p]ermanent / [N]o ")).strip().lower()
+    if mode in {"o", "once", "y", "yes"}:
+        return "approve-once", selected_ids
+    if mode in {"p", "permanent"} and confirm_group_permanent(title, len(selected_ids)):
+        return "approve-permanently", selected_ids
+    return "deny", []
+
+
+def notify(message: str):
+    display = os.environ.get("DISPLAY") or os.environ.get("WAYLAND_DISPLAY")
+    if display:
+        subprocess.run(["notify-send", "USBGuard", message], check=False)
+
+
+def blocked_devices():
+    lines = run("usbguard", "list-devices", "-b", check=False).splitlines()
+    devices = []
+    for line in lines:
+        parsed = parse_rule_line(line)
+        if parsed:
+            devices.append(parsed)
+            if len(devices) >= MAX_BLOCKED_SCAN:
+                break
+    return devices
+
+
+def load_whitelist():
+    path = os.environ.get("USBGUARD_WHITELIST_JSON")
+    if not path:
+        return {}
+    try:
+        with open(path, "r", encoding="utf-8") as handle:
+            return json.load(handle)
+    except FileNotFoundError:
+        return {}
+
+
+def watch():
+    state_dir = Path(os.environ.get("XDG_STATE_HOME", Path.home() / ".local" / "state")) / "usbguard-review"
+    state_dir.mkdir(parents=True, exist_ok=True)
+    seen_dir = state_dir / "seen"
+    seen_dir.mkdir(exist_ok=True)
+
+    whitelist = load_whitelist()
+    trusted_rules = {item.get("rule"): item for item in whitelist.get("devices", [])}
+    last_prompt_by_port = {}
+    last_prompt_global_at = 0.0
+    serial_queue_mode = env_flag("USBGUARD_SERIAL_QUEUE_MODE", "1")
+    disable_dock_grouping = env_flag("USBGUARD_DISABLE_DOCK_GROUPING", "1")
+    auto_prompt = env_flag("USBGUARD_REVIEW_AUTO_PROMPT", "0")
+
+    while True:
+        devices = blocked_devices()
+        devices.sort(key=lambda d: int(d.get("id", "0")) if str(d.get("id", "")).isdigit() else 0)
+        active_keys = set()
+        grouped_keys = set()
+        now = time.monotonic()
+        prompts_this_cycle = 0
+        queued_names = []
+
+        for device in devices:
+            if prompts_this_cycle >= MAX_PROMPTS_PER_CYCLE:
+                break
+            key = device_key(device)
+            active_keys.add(key)
+            if key in grouped_keys:
+                continue
+            marker = seen_dir / key
+            if marker.exists():
+                continue
+
+            port_token = root_port_token(device)
+            if port_token:
+                last_prompt_port_at = last_prompt_by_port.get(port_token, 0.0)
+                if now - last_prompt_port_at < PORT_PROMPT_COOLDOWN_SECONDS:
+                    continue
+
+            if now - last_prompt_global_at < PROMPT_COOLDOWN_SECONDS:
+                continue
+
+            group = [device] if disable_dock_grouping else dock_group(devices, device)
+            if (not serial_queue_mode) and len(group) > 1:
+                if port_token:
+                    last_prompt_by_port[port_token] = now
+                last_prompt_global_at = now
+                prompts_this_cycle += 1
+                group_title = tr("USBGuard review: Dock / USB-C device group")
+                if not auto_prompt:
+                    for group_device in group:
+                        group_key = device_key(group_device)
+                        grouped_keys.add(group_key)
+                        group_marker = seen_dir / group_key
+                        group_title_name = group_device.get("name") or group_device.get("usb_id") or "Unknown USB device"
+                        if not group_marker.exists():
+                            group_marker.write_text("queued", encoding="utf-8")
+                            queued_names.append(group_title_name)
+                    continue
+
+                decision, selected_ids = prompt_dock_group(group, group_title)
+                selected_ids = set(selected_ids)
+
+                for group_device in group:
+                    group_key = device_key(group_device)
+                    grouped_keys.add(group_key)
+                    group_marker = seen_dir / group_key
+                    group_title_name = group_device.get("name") or group_device.get("usb_id") or "Unknown USB device"
+                    if str(group_device.get("id", "")) in selected_ids:
+                        group_marker.write_text(decision, encoding="utf-8")
+                        if decision == "approve-once":
+                            approve(group_device, permanent=False)
+                            notify(f"Approved once: {group_title_name}")
+                        elif decision == "approve-permanently":
+                            approve(group_device, permanent=True)
+                            notify(f"Approved permanently: {group_title_name}")
+                    else:
+                        group_marker.write_text("deny", encoding="utf-8")
+                continue
+
+            if port_token:
+                last_prompt_by_port[port_token] = now
+            last_prompt_global_at = now
+            prompts_this_cycle += 1
+            title_name = device.get("name") or device.get("usb_id") or "Unknown USB device"
+
+            if not auto_prompt:
+                marker.write_text("queued", encoding="utf-8")
+                queued_names.append(title_name)
+                continue
+
+            summary = render_summary(device)
+            _trusted, note = repo_note(device, trusted_rules)
+            summary += note
+            decision = prompt(device, summary, f"USBGuard review: {title_name}", banner_markup(device))
+            marker.write_text(decision, encoding="utf-8")
+
+            if decision == "approve-once":
+                approve(device, permanent=False)
+                notify(f"Approved once: {title_name}")
+            elif decision == "approve-permanently":
+                approve(device, permanent=True)
+                notify(f"Approved permanently: {title_name}")
+            else:
+                notify(f"Kept blocked: {title_name}")
+
+            # Strictly process queue one-by-one in serial mode to avoid bursts.
+            if serial_queue_mode:
+                break
+
+        if queued_names:
+            if len(queued_names) == 1:
+                queued_detail = queued_names[0]
+            elif len(queued_names) == 2:
+                queued_detail = f"{queued_names[0]}, {queued_names[1]}"
+            else:
+                queued_detail = f"{queued_names[0]}, {queued_names[1]}, +{len(queued_names) - 2} more"
+            notify(f"USBGuard queued {len(queued_names)} device(s): {queued_detail} (run usbguard-review-queue)")
+
+        for marker in seen_dir.iterdir():
+            if marker.name not in active_keys:
+                marker.unlink()
+
+        stale_before = now - (PORT_PROMPT_COOLDOWN_SECONDS * 4)
+        for token, ts in list(last_prompt_by_port.items()):
+            if ts < stale_before:
+                del last_prompt_by_port[token]
+
+        sleep_seconds = QUEUE_POLL_SECONDS
+        if len(devices) >= QUEUE_DORMANT_BACKLOG:
+            sleep_seconds = max(sleep_seconds, QUEUE_DORMANT_SLEEP_SECONDS)
+        time.sleep(sleep_seconds)
+
+
+def main():
+    if "--watch" in sys.argv:
+        watch()
+        return
+
+    devices = blocked_devices()
+    if not devices:
+        print("No blocked USB devices in queue.")
+        return
+
+    whitelist = load_whitelist()
+    trusted_rules = {item.get("rule"): item for item in whitelist.get("devices", [])}
+    handled = set()
+
+    for device in devices:
+        key = device_key(device)
+        if key in handled:
+            continue
+
+        group = dock_group(devices, device)
+        if len(group) > 1:
+            decision, selected_ids = prompt_dock_group(group, tr("USBGuard review: Dock / USB-C device group"))
+            selected_ids = set(selected_ids)
+            for group_device in group:
+                handled.add(device_key(group_device))
+                title_name = group_device.get("name") or group_device.get("usb_id") or "Unknown USB device"
+                if str(group_device.get("id", "")) in selected_ids:
+                    approve(group_device, permanent=(decision == "approve-permanently"))
+                    if decision == "approve-permanently":
+                        print(f"Approved permanently: {title_name}")
+                    elif decision == "approve-once":
+                        print(f"Approved once: {title_name}")
+                else:
+                    print(f"Left blocked {title_name}")
+            continue
+
+        summary = render_summary(device)
+        _, note = repo_note(device, trusted_rules)
+        summary += note
+        title_name = device.get("name") or device.get("usb_id") or "Unknown USB device"
+        decision = prompt(device, summary, f"USBGuard review: {title_name}", banner_markup(device))
+        handled.add(key)
+        if decision == "approve-once":
+            approve(device, permanent=False)
+            print(f"Approved once: {title_name}")
+        elif decision == "approve-permanently":
+            approve(device, permanent=True)
+            print(f"Approved permanently: {title_name}")
+        else:
+            print(f"Left blocked {title_name}")
+
+
+if __name__ == "__main__":
+    main()

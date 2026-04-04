@@ -1,0 +1,59 @@
+{
+  "devices": [
+    {
+      "label": "Trusted dock USB2 hub",
+      "builtin": false,
+      "rule": "allow id 1da0:2188 serial \"\" name \"USB2.0 Hub\" hash \"Cpw9JK/+dwYYg258KLxEn4QyYHN0S/atMtvR3QRMfJY=\" parent-hash \"ytflbcUR58vOaTlsVdDp+prbapFyL+b4z2vdOAgegjM=\" via-port \"7-1\" with-interface { 09:00:01 09:00:02 } with-connect-type \"hotplug\""
+    },
+    {
+      "label": "Trusted dock USB3 hub",
+      "builtin": false,
+      "rule": "allow id 1da0:0188 serial \"\" name \"USB3.0 Hub\" hash \"T6WgKX9pSDPTJp5Ca93Ef/YUmEApgZ6MnH/4/I9banw=\" parent-hash \"Zlfas9XDavZIIav5URjbmR1k1M9e1RvGgGcXyk9KCJ8=\" via-port \"8-1\" with-interface 09:00:00 with-connect-type \"hotplug\""
+    },
+    {
+      "label": "Trusted Genesys USB2 hub",
+      "builtin": false,
+      "rule": "allow id 05e3:0610 serial \"\" name \"USB2.1 Hub\" hash \"1H2ky9gtbbS/N82LVsz28SAzkuwV8+1KCETppm9CiXI=\" parent-hash \"Cpw9JK/+dwYYg258KLxEn4QyYHN0S/atMtvR3QRMfJY=\" via-port \"7-1.1\" with-interface { 09:00:01 09:00:02 } with-connect-type \"unknown\""
+    },
+    {
+      "label": "Trusted dock billboard helper",
+      "builtin": false,
+      "rule": "allow id 1da0:3188 serial \"\" name \"Parade Tech Billboard \" hash \"I6apMkXOrhK9nTotOuDVAp++1edifYNXbgXdndBz+K4=\" parent-hash \"Cpw9JK/+dwYYg258KLxEn4QyYHN0S/atMtvR3QRMfJY=\" via-port \"7-1.4\" with-interface 11:00:00 with-connect-type \"unknown\""
+    },
+    {
+      "label": "Trusted Genesys USB3 hub",
+      "builtin": false,
+      "rule": "allow id 05e3:0620 serial \"\" name \"USB3.2 Hub\" hash \"nhUGeVHSLEt3LDQPqw9yBnDxKkx2NekNRMwykK8VuCs=\" parent-hash \"T6WgKX9pSDPTJp5Ca93Ef/YUmEApgZ6MnH/4/I9banw=\" via-port \"8-1.1\" with-interface 09:00:00 with-connect-type \"unknown\""
+    },
+    {
+      "label": "Trusted Geehy M3 device",
+      "builtin": false,
+      "rule": "allow id 372e:1019 serial \"000000000001\" name \"M3\" hash \"+MMaLj7a4LfMlDYYWrlwfcJcdEzm1B5xGG8tqZbQQYw=\" parent-hash \"1H2ky9gtbbS/N82LVsz28SAzkuwV8+1KCETppm9CiXI=\" via-port \"7-1.1.3\" with-interface { 03:01:02 03:01:01 03:01:00 } with-connect-type \"unknown\""
+    },
+    {
+      "label": "Trusted Huasheng USB2 hub",
+      "builtin": false,
+      "rule": "allow id 214b:7250 serial \"\" name \"USB2.0 HUB\" hash \"EqDsL5iBogtOuZitOQzOr8UAQW5HOJLvkRn8ux26o6A=\" parent-hash \"1H2ky9gtbbS/N82LVsz28SAzkuwV8+1KCETppm9CiXI=\" via-port \"7-1.1.4\" with-interface 09:00:00 with-connect-type \"unknown\""
+    },
+    {
+      "label": "Trusted dock ethernet",
+      "builtin": false,
+      "rule": "allow id 0bda:8153 serial \"001000001\" name \"USB 10/100/1000 LAN\" hash \"y8c/mp5bRTGXYVTDuNzIBwhRaTbSU30I2rp5Y7ZfR8o=\" parent-hash \"nhUGeVHSLEt3LDQPqw9yBnDxKkx2NekNRMwykK8VuCs=\" via-port \"8-1.1.1\" with-interface { ff:ff:00 02:06:00 0a:00:00 0a:00:00 } with-connect-type \"unknown\""
+    },
+    {
+      "label": "Trusted dock card reader",
+      "builtin": false,
+      "rule": "allow id 0bda:0306 serial \"201506301013\" name \"USB3.0 Card Reader\" hash \"vjA/xCky7YiNKznj9GHe4sg4tmjYpLMn3HAUEAJj/Qo=\" parent-hash \"nhUGeVHSLEt3LDQPqw9yBnDxKkx2NekNRMwykK8VuCs=\" via-port \"8-1.1.2\" with-interface 08:06:50 with-connect-type \"unknown\""
+    },
+    {
+      "label": "Trusted downstream Huasheng hub",
+      "builtin": false,
+      "rule": "allow id 214b:7250 serial \"\" name \"USB2.0 HUB\" hash \"EqDsL5iBogtOuZitOQzOr8UAQW5HOJLvkRn8ux26o6A=\" parent-hash \"EqDsL5iBogtOuZitOQzOr8UAQW5HOJLvkRn8ux26o6A=\" via-port \"7-1.1.4.1\" with-interface 09:00:00 with-connect-type \"unknown\""
+    },
+    {
+      "label": "Trusted external EMEET webcam",
+      "builtin": false,
+      "rule": "allow id 328f:0034 serial \"1e4073910118b22276100008000000000000000016HD Webcam eMeet C970L\" name \"HD Webcam eMeet C970L\" hash \"rCj0Vb0RZYLFnupPtnR1zK8QL/d7EsxrrwCXxs6BT7E=\" parent-hash \"EqDsL5iBogtOuZitOQzOr8UAQW5HOJLvkRn8ux26o6A=\" via-port \"7-1.1.4.1.2\" with-interface { 0e:01:00 0e:02:00 01:01:00 01:02:00 01:02:00 03:00:00 } with-connect-type \"unknown\""
+    }
+  ]
+}

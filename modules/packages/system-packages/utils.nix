@@ -1,0 +1,30 @@
+{ pkgs, ... }: {
+  environment.systemPackages = with pkgs; [
+    ctop
+    erdtree
+    frogmouth
+    lstr
+    lolcat
+    lsd
+    macchina
+    mcat
+    mdcat
+    parallel-disk-usage
+    pik
+    oh-my-posh
+    ncdu
+    ncftp
+    netop
+    ripgrep
+    socat
+    starship
+    trippy
+    tldr
+    tuptime
+    ugrep
+    unrar
+    v4l-utils
+    obs-studio
+    zoxide
+  ];
+}
