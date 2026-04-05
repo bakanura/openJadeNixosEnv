@@ -138,6 +138,10 @@ if type nhl_prompt_fingerprint >/dev/null 2>&1; then
     nhl_prompt_fingerprint "$hostName"
 fi
 
+if type nhl_prompt_vscode_confirm_sync >/dev/null 2>&1; then
+    nhl_prompt_vscode_confirm_sync "$hostName"
+fi
+
 echo "-----"
 
 if type nhl_resolve_install_username >/dev/null 2>&1; then
@@ -198,7 +202,8 @@ if type nhl_save_installer_state >/dev/null 2>&1; then
         "${NHL_SELECTED_TIMEZONE:-}" \
         "${NHL_SELECTED_CONSOLE_KEYMAP:-$keyboardLayout}" \
         "${NHL_ENABLE_FINGERPRINT:-0}" \
-        "${NHL_GPU_PROFILE:-}"
+        "${NHL_GPU_PROFILE:-}" \
+        "${NHL_VSCODE_CONFIRM_SYNC:-true}"
 fi
 
 echo "$NOTE Applying required Nix settings before installation"

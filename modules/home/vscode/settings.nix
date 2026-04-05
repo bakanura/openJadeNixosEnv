@@ -1,4 +1,9 @@
-{...}: {
+{
+  host,
+  ...
+}: let
+  hostVars = import ../../../hosts/${host}/variables.nix;
+in {
   programs.vscode = {
     enable = true;
 
@@ -32,7 +37,7 @@
         "**/result" = true;
       };
 
-      "git.confirmSync" = false;
+      "git.confirmSync" = hostVars.vscodeGitConfirmSync or true;
       "npm.autoDetect" = "off";
     };
   };

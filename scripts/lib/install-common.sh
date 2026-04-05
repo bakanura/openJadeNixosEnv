@@ -191,7 +191,7 @@ nhl_load_installer_state() {
   local stateFile
   stateFile=$(nhl_state_file "$hostName")
 
-  unset NHL_STATE_GPU_PROFILE NHL_STATE_KEYBOARD_LAYOUT NHL_STATE_TIMEZONE NHL_STATE_CONSOLE_KEYMAP NHL_STATE_FINGERPRINT
+  unset NHL_STATE_GPU_PROFILE NHL_STATE_KEYBOARD_LAYOUT NHL_STATE_TIMEZONE NHL_STATE_CONSOLE_KEYMAP NHL_STATE_FINGERPRINT NHL_STATE_VSCODE_CONFIRM_SYNC
 
   if [ ! -f "$stateFile" ]; then
     return 1
@@ -202,19 +202,21 @@ nhl_load_installer_state() {
   NHL_STATE_TIMEZONE=$(sed -n 's/.*"timezone"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "$stateFile" | head -n1)
   NHL_STATE_CONSOLE_KEYMAP=$(sed -n 's/.*"console_keymap"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "$stateFile" | head -n1)
   NHL_STATE_FINGERPRINT=$(sed -n 's/.*"fingerprint_enabled"[[:space:]]*:[[:space:]]*\(true\|false\).*/\1/p' "$stateFile" | head -n1)
+  NHL_STATE_VSCODE_CONFIRM_SYNC=$(sed -n 's/.*"vscode_confirm_sync"[[:space:]]*:[[:space:]]*\(true\|false\).*/\1/p' "$stateFile" | head -n1)
 
-  export NHL_STATE_GPU_PROFILE NHL_STATE_KEYBOARD_LAYOUT NHL_STATE_TIMEZONE NHL_STATE_CONSOLE_KEYMAP NHL_STATE_FINGERPRINT
+  export NHL_STATE_GPU_PROFILE NHL_STATE_KEYBOARD_LAYOUT NHL_STATE_TIMEZONE NHL_STATE_CONSOLE_KEYMAP NHL_STATE_FINGERPRINT NHL_STATE_VSCODE_CONFIRM_SYNC
   return 0
 }
 
 nhl_save_installer_state() {
-  # Args: $1 hostName, $2 keyboard, $3 timezone, $4 console keymap, $5 fingerprint(0/1), $6 gpu profile
+  # Args: $1 hostName, $2 keyboard, $3 timezone, $4 console keymap, $5 fingerprint(0/1), $6 gpu profile, $7 vscode confirm sync(true/false)
   local hostName="$1"
   local keyboardLayout="$2"
   local timeZone="$3"
   local consoleKeyMap="$4"
   local fingerprintEnabled="$5"
   local gpuProfile="$6"
+  local vscodeConfirmSync="${7:-true}"
   local stateFile
   local fpJson="false"
 
@@ -233,6 +235,7 @@ nhl_save_installer_state() {
   "console_keymap": "$consoleKeyMap",
   "timezone": "$timeZone",
   "fingerprint_enabled": $fpJson,
+  "vscode_confirm_sync": $vscodeConfirmSync,
   "updated_at": "$(date -Iseconds)"
 }
 EOF
@@ -510,6 +513,41 @@ nhl_prompt_fingerprint() {
     fi
     export NHL_ENABLE_FINGERPRINT=0
     echo "${NOTE} Fingerprint login left disabled."
+  fi
+}
+
+nhl_prompt_vscode_confirm_sync() {
+  # Args: $1 = hostName
+  local hostName="$1"
+  local vars="./hosts/$hostName/variables.nix"
+  [ -f "$vars" ] || vars="./hosts/default/variables.nix"
+
+  local default_prompt="(y/N)"
+  local default_value="n"
+  if [ "${NHL_STATE_VSCODE_CONFIRM_SYNC:-true}" = "false" ]; then
+    default_prompt="(Y/n)"
+    default_value="y"
+  fi
+
+  local always_sync
+  always_sync=$(nhl_read_input "Want VS Code to always sync when committing? ${default_prompt}: " "$default_value")
+
+  if echo "${always_sync:-n}" | grep -qi '^y'; then
+    if grep -q 'vscodeGitConfirmSync' "$vars"; then
+      sed -i 's/vscodeGitConfirmSync = [^;]*;/vscodeGitConfirmSync = false;/' "$vars" || true
+    else
+      printf '\n  vscodeGitConfirmSync = false; # false skips the VS Code sync confirmation prompt.\n' >> "$vars"
+    fi
+    export NHL_VSCODE_CONFIRM_SYNC=false
+    echo "${OK} VS Code sync confirmation disabled."
+  else
+    if grep -q 'vscodeGitConfirmSync' "$vars"; then
+      sed -i 's/vscodeGitConfirmSync = [^;]*;/vscodeGitConfirmSync = true;/' "$vars" || true
+    else
+      printf '\n  vscodeGitConfirmSync = true; # true keeps the VS Code sync confirmation prompt.\n' >> "$vars"
+    fi
+    export NHL_VSCODE_CONFIRM_SYNC=true
+    echo "${NOTE} VS Code sync confirmation kept enabled."
   fi
 }
 
