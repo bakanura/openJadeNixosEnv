@@ -96,6 +96,10 @@ git clone --depth 1 https://github.com/JaKooLit/NixOS-Hyprland.git ~/NixOS-Hyprl
 cd ~/NixOS-Hyprland || exit
 export NHL_REPO_ROOT="${HOME}/NixOS-Hyprland"
 
+if type nhl_preflight_install_repo >/dev/null 2>&1; then
+    nhl_preflight_install_repo "${NHL_REPO_ROOT}" || exit 1
+fi
+
 printf "\n%.0s" {1..2}
 
 echo "-----"
@@ -107,12 +111,14 @@ sleep 1
 
 echo "-----"
 
-if type nhl_derive_hostname >/dev/null 2>&1; then
+if type nhl_prompt_hostname >/dev/null 2>&1; then
+    hostName=$(nhl_prompt_hostname "RISIQ")
+elif type nhl_derive_hostname >/dev/null 2>&1; then
     hostName=$(nhl_derive_hostname "RISIQ")
 else
     hostName="RISIQ-UNKNOWN"
 fi
-echo "$NOTE Auto-derived hostname: $hostName"
+echo "$NOTE Selected hostname: $hostName"
 
 echo "-----"
 
@@ -229,7 +235,10 @@ if type nhl_save_installer_state >/dev/null 2>&1; then
         "${NHL_SELECTED_CONSOLE_KEYMAP:-$keyboardLayout}" \
         "${NHL_ENABLE_FINGERPRINT:-0}" \
         "${NHL_GPU_PROFILE:-}" \
-        "${NHL_VSCODE_CONFIRM_SYNC:-true}"
+        "${NHL_VSCODE_CONFIRM_SYNC:-true}" \
+        "${NHL_SELECTED_HOSTNAME_MODE:-prefix-serial}" \
+        "${NHL_SELECTED_HOSTNAME_PREFIX:-RISIQ}" \
+        "${hostName}"
 fi
 
 echo "$NOTE Applying required Nix settings before installation"

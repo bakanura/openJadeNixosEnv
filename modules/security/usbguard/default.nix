@@ -48,6 +48,12 @@ in {
 
     review.enable = lib.mkEnableOption "queued review prompts for blocked USB devices";
 
+    review.autoBlockStorage = lib.mkOption {
+      type = lib.types.bool;
+      default = true;
+      description = "Quarantine newly seen USB storage devices into the persistent block list instead of showing the normal approval popup.";
+    };
+
     requireAuthForPowerActions = lib.mkOption {
       type = lib.types.bool;
       default = true;
@@ -177,6 +183,7 @@ in {
               "USBGUARD_QUEUE_DORMANT_BACKLOG=12"
               "USBGUARD_QUEUE_DORMANT_SLEEP_SECONDS=4"
               "USBGUARD_REVIEW_AUTO_PROMPT=1"
+              "USBGUARD_REVIEW_AUTO_BLOCK_STORAGE=${if cfg.review.autoBlockStorage then "1" else "0"}"
               "USBGUARD_REVIEW_POPUPS=${if cfg.notifyUser then "1" else "0"}"
               "CUSTOM_UI_TRANSLATION_ENABLE=${if translationCfg.enable then "1" else "0"}"
               "CUSTOM_UI_TRANSLATION_PROVIDER=${translationCfg.provider}"

@@ -14,3 +14,4 @@ hosts/*/.nhl-enrolled
 # Python cache / bytecode
 __pycache__/
 *.pyc
+.aider*

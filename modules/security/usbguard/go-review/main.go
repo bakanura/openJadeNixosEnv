@@ -46,7 +46,9 @@ type whitelist struct {
 
 type persistedRules struct {
 	Devices []struct {
+		UUID  string `json:"uuid,omitempty"`
 		Label string `json:"label"`
+		Risk  string `json:"risk,omitempty"`
 		Rule  string `json:"rule"`
 	} `json:"devices"`
 }
@@ -62,6 +64,7 @@ type cfg struct {
 	SerialQueueMode     bool
 	DisableDockGrouping bool
 	AutoPrompt          bool
+	AutoBlockStorage    bool
 	Popups              bool
 	StateDir            string
 	WhitelistPath       string
@@ -129,8 +132,9 @@ func parseCLI() (cliOptions, error) {
 	fs.StringVar(&opts.ApproveID, "approve", "", "approve a blocked USBGuard device id")
 	fs.BoolVar(&opts.Permanent, "permanent", false, "use with --approve to append a persistent allow rule")
 	fs.StringVar(&opts.Release, "release", "", "release queued/denied state for a blocked id, or use all")
+	fs.StringVar(&opts.Release, "r", "", "release queued/denied state for a blocked id")
 	fs.BoolVar(&opts.Help, "help", false, "show help")
-	if err := fs.Parse(os.Args[1:]); err != nil {
+	if err := fs.Parse(normalizeArgs(os.Args[1:])); err != nil {
 		return opts, err
 	}
 	actions := 0
@@ -160,9 +164,27 @@ func printUsage(w *os.File) {
 	fmt.Fprintln(w, "  usb-guard --watch")
 	fmt.Fprintln(w, "  usb-guard --queue")
 	fmt.Fprintln(w, "  usb-guard --approve ID [--permanent]")
-	fmt.Fprintln(w, "  usb-guard --release ID")
-	fmt.Fprintln(w, "  usb-guard --release all")
+	fmt.Fprintln(w, "  usb-guard --release UUID")
+	fmt.Fprintln(w, "  usb-guard --release")
 	fmt.Fprintln(w, "  usb-guard --audit")
+}
+
+func normalizeArgs(args []string) []string {
+	out := make([]string, 0, len(args))
+	for i := 0; i < len(args); i++ {
+		arg := args[i]
+		if arg == "--release" || arg == "-r" {
+			if i+1 < len(args) && !strings.HasPrefix(args[i+1], "-") {
+				out = append(out, "--release="+args[i+1])
+				i++
+				continue
+			}
+			out = append(out, "--release=__prompt__")
+			continue
+		}
+		out = append(out, arg)
+	}
+	return out
 }
 
 func loadCfg() cfg {
@@ -182,6 +204,7 @@ func loadCfg() cfg {
 		SerialQueueMode:     envBool("USBGUARD_SERIAL_QUEUE_MODE", true),
 		DisableDockGrouping: envBool("USBGUARD_DISABLE_DOCK_GROUPING", false),
 		AutoPrompt:          envBool("USBGUARD_REVIEW_AUTO_PROMPT", true),
+		AutoBlockStorage:    envBool("USBGUARD_REVIEW_AUTO_BLOCK_STORAGE", true),
 		Popups:              envBool("USBGUARD_REVIEW_POPUPS", false),
 		StateDir:            filepath.Join(stateHome, "usbguard-review"),
 		WhitelistPath:       strings.TrimSpace(os.Getenv("USBGUARD_WHITELIST_JSON")),
@@ -315,6 +338,15 @@ func watch(c cfg, trusted map[string]string) error {
 				if err := approve(dev, false); err == nil {
 					_ = writeMarker(marker, "trusted-auto-allow")
 					notify("USBGuard", fmt.Sprintf("Auto-approved trusted device: %s", firstNonEmpty(label, displayName(dev))))
+					continue
+				}
+			}
+
+			if c.AutoBlockStorage && shouldAutoQuarantineStorage(dev) {
+				uuid, err := quarantineStorageDevice(c, dev, blacklist)
+				if err == nil {
+					_ = writeMarker(marker, "storage-quarantined")
+					notify("USBGuard", fmt.Sprintf("Storage device quarantined: %s [%s]", displayName(dev), uuid))
 					continue
 				}
 			}
@@ -491,35 +523,25 @@ func approveByID(c cfg, id string, permanent bool) error {
 
 func releaseQueued(c cfg, target string) error {
 	seenDir := filepath.Join(c.StateDir, "seen")
-	if strings.EqualFold(target, "all") {
-		entries, err := os.ReadDir(seenDir)
-		if err != nil && !os.IsNotExist(err) {
-			return err
+	if target == "__prompt__" {
+		if canPromptGraphically(c) {
+			return promptReleasePersistentBlocksYad(c)
 		}
-		count := 0
-		for _, entry := range entries {
-			if err := os.Remove(filepath.Join(seenDir, entry.Name())); err == nil || os.IsNotExist(err) {
-				count++
-			}
-		}
-		if err := releaseAllPersistentBlocks(c); err != nil {
-			return err
-		}
-		fmt.Printf("Released %d queued device marker(s).\n", count)
-		return nil
+		return promptReleasePersistentBlocksCLI(c)
 	}
-	dev, err := blockedDeviceByID(c, target)
+	released, err := releasePersistentBlockByUUID(c, target)
 	if err != nil {
 		return err
 	}
-	marker := filepath.Join(seenDir, deviceKey(dev))
-	if err := os.Remove(marker); err != nil && !os.IsNotExist(err) {
+	if !released {
+		return fmt.Errorf("no persistent blocked USB device with uuid %s", target)
+	}
+	entries, err := os.ReadDir(seenDir)
+	if err != nil && !os.IsNotExist(err) {
 		return err
 	}
-	if err := releasePersistentBlock(c, dev); err != nil {
-		return err
-	}
-	fmt.Printf("Released queue state for [%s] %s\n", dev.ID, displayName(dev))
+	_ = entries
+	fmt.Printf("Released persistent block %s back into the review queue.\n", target)
 	return nil
 }
 
@@ -1110,7 +1132,7 @@ func riskBadge(dev device) string {
 }
 
 func needsSensitiveApproval(dev device) bool {
-	if looksLikeDock(dev) {
+	if looksLikeDock(dev) || looksLikeDockChainMember(dev) {
 		return false
 	}
 	return hasPrefix(dev, "08:") || has(dev, "02:06:00") || hasPrefix(dev, "0a:")
@@ -1143,7 +1165,33 @@ func colorizeRiskLabel(risk string) string {
 
 func looksLikeDock(dev device) bool {
 	text := strings.ToLower(dev.Name + " " + dev.USBID)
-	if strings.Contains(text, "dock") || strings.Contains(text, "docking") || strings.Contains(text, "billboard") || strings.Contains(text, "displaylink") {
+	explicitDockMarkers := []string{
+		"dock",
+		"docking",
+		"billboard",
+		"displaylink",
+		"parade",
+		"genesys",
+		"ethernet",
+		"card reader",
+		"rtl8153",
+		"usb 10/100/1000 lan",
+	}
+	obviousNonDockMarkers := []string{
+		"bluetooth",
+		"fingerprint",
+		"webcam",
+		"camera",
+		"headset",
+		"dongle",
+		"receiver",
+		"adapter",
+		"extender",
+	}
+	if containsAny(text, obviousNonDockMarkers) && !containsAny(text, explicitDockMarkers) {
+		return false
+	}
+	if containsAny(text, explicitDockMarkers) {
 		return true
 	}
 	rich := 0
@@ -1161,6 +1209,16 @@ func looksLikeDock(dev device) bool {
 
 func hasHID(dev device) bool {
 	return hasPrefix(dev, "03:")
+}
+
+func looksLikeDockChainMember(dev device) bool {
+	if strings.Count(dev.ViaPort, ".") < 2 {
+		return false
+	}
+	if looksLikeDock(dev) {
+		return true
+	}
+	return has(dev, "02:06:00") || hasPrefix(dev, "0a:") || hasPrefix(dev, "09:") || hasPrefix(dev, "0e:") || hasPrefix(dev, "11:")
 }
 
 func dockGroupEligible(dev device) bool {
@@ -1240,7 +1298,7 @@ func persistBlock(c cfg, dev device, blacklist persistedRules) error {
 			return err
 		}
 	}
-	if err := savePersistedRule(c.BlacklistPath, displayName(dev), rule); err != nil {
+	if err := savePersistedRule(c.BlacklistPath, displayName(dev), rule, riskLevel(dev)); err != nil {
 		return err
 	}
 	return blockDevice(dev)
@@ -1313,17 +1371,40 @@ func savePersistedRules(path string, rules persistedRules) error {
 	return os.WriteFile(path, data, 0o644)
 }
 
-func savePersistedRule(path, label, rule string) error {
+func savePersistedRule(path, label, rule, risk string) error {
 	rules := loadPersistedRules(path)
-	for _, item := range rules.Devices {
+	updated := false
+	for idx, item := range rules.Devices {
 		if item.Rule == rule {
-			return savePersistedRules(path, rules)
+			if item.UUID == "" {
+				rules.Devices[idx].UUID = persistentRuleUUID(item.Rule)
+				updated = true
+			}
+			if strings.TrimSpace(item.Risk) == "" && strings.TrimSpace(risk) != "" {
+				rules.Devices[idx].Risk = risk
+				updated = true
+			}
+			if strings.TrimSpace(item.Label) == "" && strings.TrimSpace(label) != "" {
+				rules.Devices[idx].Label = label
+				updated = true
+			}
+			if updated {
+				return savePersistedRules(path, rules)
+			}
+			return nil
 		}
 	}
 	rules.Devices = append(rules.Devices, struct {
+		UUID  string `json:"uuid,omitempty"`
 		Label string `json:"label"`
+		Risk  string `json:"risk,omitempty"`
 		Rule  string `json:"rule"`
-	}{Label: label, Rule: rule})
+	}{
+		UUID:  persistentRuleUUID(rule),
+		Label: label,
+		Risk:  risk,
+		Rule:  rule,
+	})
 	return savePersistedRules(path, rules)
 }
 
@@ -1360,16 +1441,6 @@ func releasePersistentBlock(c cfg, dev device) error {
 	return removePersistedRule(c.BlacklistPath, rule)
 }
 
-func releaseAllPersistentBlocks(c cfg) error {
-	rules := loadPersistedRules(c.BlacklistPath)
-	for _, item := range rules.Devices {
-		if err := removeMatchingRuntimeRule(item.Rule); err != nil {
-			return err
-		}
-	}
-	return savePersistedRules(c.BlacklistPath, persistedRules{})
-}
-
 func removeMatchingRuntimeRule(rule string) error {
 	out, err := run("usbguard", "list-rules")
 	if err != nil {
@@ -1392,6 +1463,209 @@ func removeMatchingRuntimeRule(rule string) error {
 		}
 	}
 	return scanner.Err()
+}
+
+func persistentRuleUUID(rule string) string {
+	sum := sha256.Sum256([]byte(rule))
+	return hex.EncodeToString(sum[:8])
+}
+
+func shouldAutoQuarantineStorage(dev device) bool {
+	return hasPrefix(dev, "08:")
+}
+
+func quarantineStorageDevice(c cfg, dev device, blacklist persistedRules) (string, error) {
+	rule := blockRuleFor(dev)
+	if err := persistBlock(c, dev, blacklist); err != nil {
+		return "", err
+	}
+	return persistentRuleUUID(rule), nil
+}
+
+func persistedRuleDisplayName(label string) string {
+	label = strings.TrimSpace(label)
+	if label == "" || strings.EqualFold(label, "unknown usb device") {
+		return "Unknown USB device [name missing]"
+	}
+	return label
+}
+
+func persistedRuleDisplayNameMarkup(label string) string {
+	clean := persistedRuleDisplayName(label)
+	if strings.Contains(clean, "[name missing]") {
+		return escapeMarkup(clean[:len(clean)-len(" [name missing]")]) + " <span foreground=\"#ff6b6b\">[name missing]</span>"
+	}
+	return escapeMarkup(clean)
+}
+
+func persistedRuleRisk(item struct {
+	UUID  string `json:"uuid,omitempty"`
+	Label string `json:"label"`
+	Risk  string `json:"risk,omitempty"`
+	Rule  string `json:"rule"`
+}) string {
+	if strings.TrimSpace(item.Risk) != "" {
+		return item.Risk
+	}
+	switch {
+	case strings.Contains(item.Rule, "03:01:01"):
+		return "High"
+	case strings.Contains(item.Rule, "03:"), strings.Contains(item.Rule, "08:"), strings.Contains(item.Rule, "02:06:00"), strings.Contains(item.Rule, "0a:"):
+		return "Medium"
+	default:
+		return "Low"
+	}
+}
+
+func persistedRuleRiskMarkup(item struct {
+	UUID  string `json:"uuid,omitempty"`
+	Label string `json:"label"`
+	Risk  string `json:"risk,omitempty"`
+	Rule  string `json:"rule"`
+}) string {
+	risk := persistedRuleRisk(item)
+	switch risk {
+	case "High":
+		return "<span foreground=\"#ff6b6b\">High</span>"
+	case "Medium":
+		return "<span foreground=\"#f6c177\">Medium</span>"
+	default:
+		return "<span foreground=\"#98c379\">Low</span>"
+	}
+}
+
+func releasePersistentBlockByUUID(c cfg, uuid string) (bool, error) {
+	rules := loadPersistedRules(c.BlacklistPath)
+	filtered := persistedRules{}
+	releasedRule := ""
+	for _, item := range rules.Devices {
+		itemUUID := item.UUID
+		if itemUUID == "" {
+			itemUUID = persistentRuleUUID(item.Rule)
+		}
+		if itemUUID == uuid {
+			releasedRule = item.Rule
+			continue
+		}
+		filtered.Devices = append(filtered.Devices, item)
+	}
+	if releasedRule == "" {
+		return false, nil
+	}
+	if err := removeMatchingRuntimeRule(releasedRule); err != nil {
+		return false, err
+	}
+	if err := savePersistedRules(c.BlacklistPath, filtered); err != nil {
+		return false, err
+	}
+	if devices, err := blockedDevices(c); err == nil {
+		seenDir := filepath.Join(c.StateDir, "seen")
+		for _, dev := range devices {
+			if blockRuleFor(dev) != releasedRule {
+				continue
+			}
+			_ = os.Remove(filepath.Join(seenDir, deviceKey(dev)))
+		}
+	}
+	return true, nil
+}
+
+func promptReleasePersistentBlocksCLI(c cfg) error {
+	rules := loadPersistedRules(c.BlacklistPath)
+	if len(rules.Devices) == 0 {
+		fmt.Println("No persistent blocked USB devices are recorded.")
+		return nil
+	}
+	fmt.Println("Persistent blocked USB devices:")
+	for _, item := range rules.Devices {
+		uuid := item.UUID
+		if uuid == "" {
+			uuid = persistentRuleUUID(item.Rule)
+		}
+		fmt.Printf("  [%s] %s (%s)\n", uuid, persistedRuleDisplayName(item.Label), persistedRuleRisk(item))
+	}
+	fmt.Print("Enter UUIDs to release, separated by spaces, or leave blank to cancel: ")
+	reader := bufio.NewReader(os.Stdin)
+	line, err := reader.ReadString('\n')
+	if err != nil {
+		return err
+	}
+	selected := strings.Fields(strings.TrimSpace(line))
+	if len(selected) == 0 {
+		return nil
+	}
+	for _, uuid := range selected {
+		if _, err := releasePersistentBlockByUUID(c, uuid); err != nil {
+			return err
+		}
+		fmt.Printf("Released persistent block %s back into the review queue.\n", uuid)
+	}
+	return nil
+}
+
+func promptReleasePersistentBlocksYad(c cfg) error {
+	rules := loadPersistedRules(c.BlacklistPath)
+	if len(rules.Devices) == 0 {
+		cmd := exec.Command("yad",
+			"--info",
+			"--title=USBGuard persistent block list",
+			"--width=520",
+			"--height=140",
+			"--center",
+			"--text=No persistent blocked USB devices are recorded.",
+			"--button=Close:0",
+		)
+		cmd.Env = os.Environ()
+		_, _ = cmd.CombinedOutput()
+		return nil
+	}
+
+	rows := []string{}
+	for _, item := range rules.Devices {
+		uuid := item.UUID
+		if uuid == "" {
+			uuid = persistentRuleUUID(item.Rule)
+		}
+		rows = append(rows, "FALSE", uuid, persistedRuleDisplayNameMarkup(item.Label), persistedRuleRiskMarkup(item))
+	}
+
+	cmdArgs := []string{
+		"--title=USBGuard persistent block list",
+		"--width=980",
+		"--height=520",
+		"--center",
+		"--text=<span foreground=\"#f6c177\" weight=\"bold\">Select persistent blocked devices to release back into the approval queue. Unticked entries stay blocked.</span>",
+		"--text-align=left",
+		"--list",
+		"--checklist",
+		"--use-markup",
+		"--separator=|",
+		"--print-column=2",
+		"--column=Release:CHK",
+		"--column=UUID:TEXT",
+		"--column=Device:TEXT",
+		"--column=Risk:TEXT",
+		"--button=Release selected:0",
+		"--button=Cancel:1",
+	}
+	cmdArgs = append(cmdArgs, rows...)
+	cmd := exec.Command("yad", cmdArgs...)
+	cmd.Env = os.Environ()
+	output, err := cmd.CombinedOutput()
+	switch exitCode(err) {
+	case 0:
+		selected := parseSelectedIDs(string(output))
+		for _, uuid := range selected {
+			if _, err := releasePersistentBlockByUUID(c, uuid); err != nil {
+				return err
+			}
+		}
+		return nil
+	case 1, 252:
+		return nil
+	default:
+		return fmt.Errorf("yad release prompt failed: %s", strings.TrimSpace(string(output)))
+	}
 }
 
 func confirmSensitiveApprovalCLI(reader *bufio.Reader, dev device) (bool, error) {
@@ -1554,6 +1828,15 @@ func has(dev device, exact string) bool {
 func hasPrefix(dev device, prefix string) bool {
 	for _, item := range dev.Interfaces {
 		if strings.HasPrefix(item, prefix) {
+			return true
+		}
+	}
+	return false
+}
+
+func containsAny(text string, markers []string) bool {
+	for _, marker := range markers {
+		if strings.Contains(text, marker) {
 			return true
 		}
 	}

@@ -221,6 +221,7 @@ in {
   networking = {
     networkmanager = {
       enable = true;
+      dns = "systemd-resolved";
       wifi.powersave = false;
       dispatcherScripts = [
         {
@@ -254,6 +255,7 @@ in {
 
   # Set your time zone.
   services.automatic-timezoned.enable = false; # based on IP location
+  services.resolved.enable = true;
 
   #https://en.wikipedia.org/wiki/List_of_tz_database_time_zones
 

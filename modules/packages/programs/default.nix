@@ -16,8 +16,15 @@ let
     else
       pkgs._1password-gui;
 in {
-  services.power-profiles-daemon.enable = true;
-
+  services = {
+    power-profiles-daemon.enable = true;
+    ollama = {
+        enable = true;
+        loadModels = [
+            "qwen2.5-coder:7b"
+        ];
+    };
+  };
   programs = {
     hyprland = {
       enable = true;
@@ -47,6 +54,7 @@ in {
     neovim = {
       enable = true;
       defaultEditor = false;
+
     };
 
     thunar.enable = true;

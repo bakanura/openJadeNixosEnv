@@ -45,7 +45,7 @@ start_spinner() {
         current_msg="$(pick_rebuild_message)"
       fi
       c="${chars:i%4:1}"
-      printf '\r\033[2K[%s] %s' "$c" "$current_msg"
+      printf '\r\033[2K[%s] %s' "$c" "$current_msg" >&2
       i=$((i + 1))
       sleep 0.12
     done
@@ -58,7 +58,7 @@ stop_spinner() {
     kill "$SPINNER_PID" >/dev/null 2>&1 || true
     wait "$SPINNER_PID" 2>/dev/null || true
     SPINNER_PID=""
-    printf '\r\033[2K'
+    printf '\r\033[2K' >&2
   fi
 }
 
@@ -67,7 +67,7 @@ pick_rebuild_message() {
   json_path="$PWD/modules/tools/scripts/rebuild-messages.json"
 
   if ! command -v python3 >/dev/null 2>&1; then
-    printf '%s\n' "Rebuilding NixOS for ${runtime_host:-this-host}... such wow."
+    printf '%s\n' "such wow."
     return 0
   fi
 
@@ -92,10 +92,13 @@ for key, values in data.items():
                 messages.extend(tagged_values)
 
 if not messages:
-    print(f"Rebuilding NixOS for {host}... such wow.")
+    print("such wow.")
     raise SystemExit(0)
 
+prefix = f"Rebuilding NixOS for {host}... "
 message = random.choice(messages).replace("$runtime_host", host)
+if message.startswith(prefix):
+    message = message[len(prefix):]
 print(message)
 PY
 }
@@ -214,7 +217,6 @@ if [ "$build_mode" = "verbose" ]; then
   nh os switch -u -H "$runtime_host" .
 else
   build_log="$(mktemp -t update-rebuild.XXXXXX.log)"
-  echo "[INFO] Quiet mode enabled. Live build output is hidden."
   echo "[INFO] Writing full build log to: $build_log"
 
   start_spinner "Rebuilding NixOS for $runtime_host..." "1"

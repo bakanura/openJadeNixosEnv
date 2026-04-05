@@ -99,12 +99,8 @@ nhl_resolve_install_username() {
   fi
 }
 
-nhl_derive_hostname() {
-  # Args: $1 = optional prefix (default: RISIQ)
-  local prefix="${1:-RISIQ}"
+nhl_detect_host_serial() {
   local serial=""
-  local serial_clean=""
-  local hostName=""
 
   if [ -r /sys/class/dmi/id/product_serial ]; then
     serial=$(tr -d '[:space:]' </sys/class/dmi/id/product_serial 2>/dev/null || true)
@@ -118,6 +114,30 @@ nhl_derive_hostname() {
     serial=$(cut -c1-12 /etc/machine-id 2>/dev/null || true)
   fi
 
+  printf "%s\n" "$serial"
+}
+
+nhl_sanitize_hostname() {
+  local raw="$1"
+  local sanitized=""
+
+  sanitized=$(printf "%s" "$raw" | tr '[:space:]' '-' | tr -cd '[:alnum:]-')
+  sanitized=$(printf "%s" "$sanitized" | sed 's/--*/-/g; s/^-//; s/-$//')
+  sanitized="${sanitized:0:63}"
+  if [ -z "$sanitized" ]; then
+    sanitized="RISIQ-UNKNOWN"
+  fi
+  printf "%s\n" "$sanitized"
+}
+
+nhl_derive_hostname() {
+  # Args: $1 = optional prefix (default: RISIQ)
+  local prefix="${1:-RISIQ}"
+  local serial=""
+  local serial_clean=""
+  local hostName=""
+
+  serial=$(nhl_detect_host_serial)
   # Keep alphanumeric only for hostname safety.
   serial_clean=$(echo "$serial" | tr -cd '[:alnum:]')
   if [ -z "$serial_clean" ]; then
@@ -126,9 +146,64 @@ nhl_derive_hostname() {
 
   hostName="${prefix}-${serial_clean}"
   # Linux hostname max is 63 chars.
-  hostName="${hostName:0:63}"
+  hostName=$(nhl_sanitize_hostname "$hostName")
 
   printf "%s\n" "$hostName"
+}
+
+nhl_prompt_hostname() {
+  local default_prefix="${1:-RISIQ}"
+  local default_mode="${NHL_STATE_HOSTNAME_MODE:-prefix-serial}"
+  local serial=""
+  local serial_clean=""
+  local mode_prompt="[p]refix+serial / [c]ustom name"
+  local mode_default="p"
+  local mode=""
+  local prefix=""
+  local custom=""
+
+  serial=$(nhl_detect_host_serial)
+  serial_clean=$(printf "%s" "$serial" | tr -cd '[:alnum:]')
+  if [ -z "$serial_clean" ]; then
+    serial_clean="UNKNOWN"
+  fi
+
+  if [ "$default_mode" = "custom" ]; then
+    mode_default="c"
+  fi
+
+  mode=$(nhl_read_input "Choose hostname style ${mode_prompt}: [${mode_default}] " "$mode_default")
+  if printf "%s" "$mode" | grep -qi '^c'; then
+    custom=$(nhl_read_input "Enter the exact hostname to use (no serial will be appended): " "${NHL_STATE_HOSTNAME_VALUE:-}")
+    export NHL_SELECTED_HOSTNAME_MODE="custom"
+    export NHL_SELECTED_HOSTNAME_VALUE="$(nhl_sanitize_hostname "$custom")"
+    printf "%s\n" "${NHL_SELECTED_HOSTNAME_VALUE}"
+    return 0
+  fi
+
+  prefix=$(nhl_read_input "Enter hostname prefix to combine with this device serial (${serial_clean}): " "${NHL_STATE_HOSTNAME_PREFIX:-$default_prefix}")
+  export NHL_SELECTED_HOSTNAME_MODE="prefix-serial"
+  export NHL_SELECTED_HOSTNAME_PREFIX="$(nhl_sanitize_hostname "$prefix")"
+  export NHL_SELECTED_HOSTNAME_VALUE="$(nhl_derive_hostname "${NHL_SELECTED_HOSTNAME_PREFIX}")"
+  printf "%s\n" "${NHL_SELECTED_HOSTNAME_VALUE}"
+}
+
+nhl_preflight_install_repo() {
+  local repoRoot="${1:-$(pwd)}"
+  local missing=0
+
+  for path in flake.nix install.sh auto-install.sh hosts/default/config.nix hosts/default/variables.nix scripts/lib/install-common.sh; do
+    if [ ! -e "${repoRoot}/${path}" ]; then
+      echo "[ERROR] Missing required installer path: ${path}"
+      missing=1
+    fi
+  done
+
+  if [ "$missing" -ne 0 ]; then
+    return 1
+  fi
+
+  return 0
 }
 
 nhl_is_enrolled_device() {
@@ -191,7 +266,7 @@ nhl_load_installer_state() {
   local stateFile
   stateFile=$(nhl_state_file "$hostName")
 
-  unset NHL_STATE_GPU_PROFILE NHL_STATE_KEYBOARD_LAYOUT NHL_STATE_TIMEZONE NHL_STATE_CONSOLE_KEYMAP NHL_STATE_FINGERPRINT NHL_STATE_VSCODE_CONFIRM_SYNC
+  unset NHL_STATE_GPU_PROFILE NHL_STATE_KEYBOARD_LAYOUT NHL_STATE_TIMEZONE NHL_STATE_CONSOLE_KEYMAP NHL_STATE_FINGERPRINT NHL_STATE_VSCODE_CONFIRM_SYNC NHL_STATE_HOSTNAME_MODE NHL_STATE_HOSTNAME_PREFIX NHL_STATE_HOSTNAME_VALUE
 
   if [ ! -f "$stateFile" ]; then
     return 1
@@ -203,13 +278,16 @@ nhl_load_installer_state() {
   NHL_STATE_CONSOLE_KEYMAP=$(sed -n 's/.*"console_keymap"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "$stateFile" | head -n1)
   NHL_STATE_FINGERPRINT=$(sed -n 's/.*"fingerprint_enabled"[[:space:]]*:[[:space:]]*\(true\|false\).*/\1/p' "$stateFile" | head -n1)
   NHL_STATE_VSCODE_CONFIRM_SYNC=$(sed -n 's/.*"vscode_confirm_sync"[[:space:]]*:[[:space:]]*\(true\|false\).*/\1/p' "$stateFile" | head -n1)
+  NHL_STATE_HOSTNAME_MODE=$(sed -n 's/.*"hostname_mode"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "$stateFile" | head -n1)
+  NHL_STATE_HOSTNAME_PREFIX=$(sed -n 's/.*"hostname_prefix"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "$stateFile" | head -n1)
+  NHL_STATE_HOSTNAME_VALUE=$(sed -n 's/.*"hostname_value"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "$stateFile" | head -n1)
 
-  export NHL_STATE_GPU_PROFILE NHL_STATE_KEYBOARD_LAYOUT NHL_STATE_TIMEZONE NHL_STATE_CONSOLE_KEYMAP NHL_STATE_FINGERPRINT NHL_STATE_VSCODE_CONFIRM_SYNC
+  export NHL_STATE_GPU_PROFILE NHL_STATE_KEYBOARD_LAYOUT NHL_STATE_TIMEZONE NHL_STATE_CONSOLE_KEYMAP NHL_STATE_FINGERPRINT NHL_STATE_VSCODE_CONFIRM_SYNC NHL_STATE_HOSTNAME_MODE NHL_STATE_HOSTNAME_PREFIX NHL_STATE_HOSTNAME_VALUE
   return 0
 }
 
 nhl_save_installer_state() {
-  # Args: $1 hostName, $2 keyboard, $3 timezone, $4 console keymap, $5 fingerprint(0/1), $6 gpu profile, $7 vscode confirm sync(true/false)
+  # Args: $1 hostName, $2 keyboard, $3 timezone, $4 console keymap, $5 fingerprint(0/1), $6 gpu profile, $7 vscode confirm sync(true/false), $8 hostname mode, $9 hostname prefix, $10 hostname value
   local hostName="$1"
   local keyboardLayout="$2"
   local timeZone="$3"
@@ -217,6 +295,9 @@ nhl_save_installer_state() {
   local fingerprintEnabled="$5"
   local gpuProfile="$6"
   local vscodeConfirmSync="${7:-true}"
+  local hostnameMode="${8:-prefix-serial}"
+  local hostnamePrefix="${9:-RISIQ}"
+  local hostnameValue="${10:-$hostName}"
   local stateFile
   local fpJson="false"
 
@@ -236,6 +317,9 @@ nhl_save_installer_state() {
   "timezone": "$timeZone",
   "fingerprint_enabled": $fpJson,
   "vscode_confirm_sync": $vscodeConfirmSync,
+  "hostname_mode": "$hostnameMode",
+  "hostname_prefix": "$hostnamePrefix",
+  "hostname_value": "$hostnameValue",
   "updated_at": "$(date -Iseconds)"
 }
 EOF

@@ -75,6 +75,7 @@ in {
   environment.systemPackages = with pkgs; [
     loupe
     appimage-run
+    aider-chat
     bc
     brightnessctl
     (btop.override {
@@ -108,11 +109,13 @@ in {
     glib
     gsettings-qt
     git
+    ollama
     firefox
     gnome-system-monitor
     fastfetch
     jq
     gcc
+    python3
     gnumake
     grim
     grimblast
