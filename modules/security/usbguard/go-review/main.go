@@ -684,6 +684,10 @@ func promptGroupCLI(group []device) (string, []string, error) {
 	reader := bufio.NewReader(os.Stdin)
 	for {
 		fmt.Println(renderDockSummary(group))
+		fmt.Println("Selected by default:")
+		for _, item := range group {
+			fmt.Printf("  [x] [%s] %s\n", item.ID, displayName(item))
+		}
 		fmt.Print("Approve dock [o]nce / [p]ermanent / [b]lock device / [d]etails / [s]kip: ")
 		mode, err := reader.ReadString('\n')
 		if err != nil {
@@ -793,38 +797,41 @@ func promptSingleYad(trusted map[string]string, dev device) (string, error) {
 }
 
 func promptGroupYad(group []device) (string, []string, error) {
-	tmp, err := os.CreateTemp("", "usbguard-group-review-*.txt")
-	if err != nil {
-		return "skip", nil, err
-	}
-	defer os.Remove(tmp.Name())
-	if _, err := tmp.WriteString(renderDockSummary(group)); err != nil {
-		tmp.Close()
-		return "skip", nil, err
-	}
-	if err := tmp.Close(); err != nil {
-		return "skip", nil, err
+	rows := make([]string, 0, len(group)*4)
+	for _, item := range group {
+		rows = append(rows, "TRUE", item.ID, displayName(item), riskLevel(item))
 	}
 
 	for {
-		cmd := exec.Command("yad",
+		args := []string{
 			"--title=USBGuard review: Dock / USB-C device group",
-			"--width=920",
-			"--height=420",
+			"--width=980",
+			"--height=520",
 			"--center",
-			"--text="+promptBannerGroup(group),
+			"--text=" + promptBannerGroup(group),
 			"--text-align=left",
-			"--text-info",
-			"--filename="+tmp.Name(),
+			"--list",
+			"--checklist",
+			"--separator=|",
+			"--print-column=2",
+			"--column=Allow:CHK",
+			"--column=ID:TEXT",
+			"--column=Device:TEXT",
+			"--column=Risk:TEXT",
 			"--button=View details:4",
 			"--button=Approve dock once:0",
 			"--button=Approve dock permanently:2",
 			"--button=Block device:3",
 			"--button=Skip:1",
-		)
+		}
+		args = append(args, rows...)
+		cmd := exec.Command("yad", args...)
 		cmd.Env = os.Environ()
 		output, err := cmd.CombinedOutput()
-		selected := groupIDs(group)
+		selected := parseSelectedIDs(string(output))
+		if len(selected) == 0 {
+			selected = groupIDs(group)
+		}
 		switch exitCode(err) {
 		case 0:
 			return "approve-once", selected, nil
@@ -857,6 +864,22 @@ func promptGroupYad(group []device) (string, []string, error) {
 			return "skip", nil, fmt.Errorf("yad group prompt failed: %s", strings.TrimSpace(string(output)))
 		}
 	}
+}
+
+func parseSelectedIDs(raw string) []string {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return nil
+	}
+	parts := strings.Split(raw, "|")
+	out := make([]string, 0, len(parts))
+	for _, part := range parts {
+		part = strings.TrimSpace(part)
+		if part != "" {
+			out = append(out, part)
+		}
+	}
+	return out
 }
 
 func confirmPermanentCLI(reader *bufio.Reader, name string) (bool, error) {
@@ -982,7 +1005,7 @@ func renderDockSummary(group []device) string {
 		"Dock / USB-C Chain Review",
 		"",
 		fmt.Sprintf("This group contains %d related dock device(s).", len(group)),
-		"Storage-class devices are intentionally split out and reviewed separately.",
+		"Storage-class and HID devices are intentionally split out and reviewed separately.",
 		"",
 		"Members:",
 	}
@@ -1023,7 +1046,7 @@ func promptBanner(dev device) string {
 }
 
 func promptBannerGroup(group []device) string {
-	return fmt.Sprintf("<span foreground=\"#f6c177\" weight=\"bold\">Review the dock as one item. This group contains %d attached dock subdevice(s). Storage devices are reviewed separately.</span>", len(group))
+	return fmt.Sprintf("<span foreground=\"#f6c177\" weight=\"bold\">Review the dock as one item. This group contains %d attached dock subdevice(s). Storage and HID devices are reviewed separately. Unticked entries stay blocked.</span>", len(group))
 }
 
 func suspiciousNotes(dev device) []string {
@@ -1136,8 +1159,19 @@ func looksLikeDock(dev device) bool {
 	return rich >= 2
 }
 
+func hasHID(dev device) bool {
+	return hasPrefix(dev, "03:")
+}
+
+func dockGroupEligible(dev device) bool {
+	if hasPrefix(dev, "08:") || hasHID(dev) {
+		return false
+	}
+	return looksLikeDock(dev) || hasPrefix(dev, "09:") || hasPrefix(dev, "0e:") || has(dev, "02:06:00") || hasPrefix(dev, "0a:")
+}
+
 func dockGroup(c cfg, all []device, anchor device) []device {
-	if c.DisableDockGrouping || !looksLikeDock(anchor) || hasPrefix(anchor, "08:") {
+	if c.DisableDockGrouping || !dockGroupEligible(anchor) {
 		return []device{anchor}
 	}
 	token := rootPortToken(anchor)
@@ -1146,16 +1180,17 @@ func dockGroup(c cfg, all []device, anchor device) []device {
 	}
 	group := []device{}
 	for _, item := range all {
-		if rootPortToken(item) != token || hasPrefix(item, "08:") {
+		if rootPortToken(item) != token || !dockGroupEligible(item) {
 			continue
 		}
-		if looksLikeDock(item) || hasPrefix(item, "09:") || hasPrefix(item, "0e:") || has(item, "02:06:00") || hasPrefix(item, "0a:") {
-			group = append(group, item)
-		}
+		group = append(group, item)
 	}
-	if len(group) == 0 {
+	if len(group) <= 1 {
 		return []device{anchor}
 	}
+	sort.SliceStable(group, func(i, j int) bool {
+		return group[i].ViaPort < group[j].ViaPort
+	})
 	return group
 }
 
