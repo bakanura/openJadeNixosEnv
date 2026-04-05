@@ -29,89 +29,97 @@
     };
   };
 
-  outputs =
-    inputs @ { self
-    , nixpkgs
-    , nixpkgs-unstable
-    , ags
-    , alejandra
-    , ...
-    }:
-    let
-      system = "x86_64-linux";
-      host = "RISIQ-4ecb329e0225";
-      username = "roederp";
-
-      pkgs = import nixpkgs {
-        inherit system;
-        config = {
-          allowUnfree = true;
-        };
-      };
-      pkgsUnstable = import nixpkgs-unstable {
-        inherit system;
-        config = {
-          allowUnfree = true;
-        };
-      };
-      waybarWeatherPkg = pkgs.callPackage ./pkgs/waybar-weather.nix { };
-    in
-    {
-      packages.${system} = {
-        waybar-weather = waybarWeatherPkg;
-      };
-      nixosConfigurations = {
-        "${host}" = nixpkgs.lib.nixosSystem rec {
-          specialArgs = {
-            inherit system;
-            inherit inputs;
-            inherit username;
-            inherit host;
-            inherit pkgsUnstable;
-          };
-          modules = [
-            ./hosts/${host}/config.nix
-            # inputs.distro-grub-themes.nixosModules.${system}.default
-            ./modules/overlays.nix # nixpkgs overlays (CMake policy fixes)
-            ./modules/desktop # desktop shell, portals, theme, login manager
-            ./modules/packages.nix # Software packages
-            ./modules/custom-ui # shared translation helper for custom UI scripts
-            ./modules/tools # helper commands and nh integration
-            # Allow broken packages (temporary fix for broken CUDA in nixos-unstable)
-            { nixpkgs.config.allowBroken = true; }
-            ./modules/fonts.nix # Fonts packages
-            ./modules/security/default.nix # fingerprint auth + session hardening
-            ./modules/entra # optional Entra/Intune managed deployment mode
-            ./modules/power.nix # battery charge thresholds (95% default)
-            # Temporarily disabled: current catppuccin module in lockfile references
-            # services.displayManager.generic, which is invalid on this NixOS release.
-            # inputs.catppuccin.nixosModules.catppuccin
-            # Integrate Home Manager as a NixOS module
-            inputs.home-manager.nixosModules.home-manager
-            {
-              home-manager.useGlobalPkgs = true;
-              home-manager.useUserPackages = true;
-              home-manager.backupFileExtension = "hm-bak";
-              home-manager.overwriteBackup = true;
-
-              # Ensure HM modules can access flake inputs (e.g., inputs.nixvim)
-              home-manager.extraSpecialArgs = { inherit inputs system username host; };
-
-              home-manager.users.${username} = {
-                home.username = username;
-                home.homeDirectory = "/home/${username}";
-                home.stateVersion = "24.05";
-
-                # Import your copied HM modules
-                imports = [
-                  ./modules/home/default.nix
-                ];
-              };
-            }
-          ];
-        };
-      };
-      # Code formatter
-      formatter.x86_64-linux = alejandra.defaultPackage.x86_64-linux;
+  outputs = inputs @ {
+    self,
+    nixpkgs,
+    nixpkgs-unstable,
+    ags,
+    alejandra,
+    ...
+  }: let
+    system = "x86_64-linux";
+    hostNames =
+      builtins.filter
+      (name: (builtins.readDir ./hosts)."${name}" == "directory")
+      (builtins.attrNames (builtins.readDir ./hosts));
+    hostIdentity = host: let
+      identityPath = ./. + "/hosts/${host}/identity.json";
+      identity =
+        if builtins.pathExists identityPath
+        then builtins.fromJSON (builtins.readFile identityPath)
+        else {};
+    in {
+      username = identity.username or "roederp";
     };
+
+    pkgs = import nixpkgs {
+      inherit system;
+      config = {
+        allowUnfree = true;
+      };
+    };
+    pkgsUnstable = import nixpkgs-unstable {
+      inherit system;
+      config = {
+        allowUnfree = true;
+      };
+    };
+    waybarWeatherPkg = pkgs.callPackage ./pkgs/waybar-weather.nix {};
+  in {
+    packages.${system} = {
+      waybar-weather = waybarWeatherPkg;
+    };
+    nixosConfigurations = builtins.listToAttrs (
+      map
+      (
+        host: let
+          identity = hostIdentity host;
+          username = identity.username;
+        in {
+          name = host;
+          value = nixpkgs.lib.nixosSystem rec {
+            specialArgs = {
+              inherit system;
+              inherit inputs;
+              inherit username;
+              inherit host;
+              inherit pkgsUnstable;
+            };
+            modules = [
+              (./. + "/hosts/${host}/config.nix")
+              ./modules/overlays.nix
+              ./modules/desktop
+              ./modules/packages.nix
+              ./modules/custom-ui
+              ./modules/tools
+              {nixpkgs.config.allowBroken = true;}
+              ./modules/fonts.nix
+              ./modules/security/default.nix
+              ./modules/entra
+              ./modules/power.nix
+              inputs.home-manager.nixosModules.home-manager
+              {
+                home-manager.useGlobalPkgs = true;
+                home-manager.useUserPackages = true;
+                home-manager.backupFileExtension = "hm-bak";
+                home-manager.overwriteBackup = true;
+                home-manager.extraSpecialArgs = {inherit inputs system username host;};
+                home-manager.users.${username} = {
+                  home.username = username;
+                  home.homeDirectory = "/home/${username}";
+                  home.stateVersion = "24.05";
+                  imports = [
+                    ./modules/home/default.nix
+                  ];
+                };
+              }
+            ];
+          };
+        }
+      )
+      hostNames
+    );
+    # Code formatter
+    formatter.x86_64-linux = alejandra.defaultPackage.x86_64-linux;
+  };
 }

@@ -7,6 +7,10 @@
 }: let
   cfg = config.local.security.usb;
   translationCfg = config.local.customUiTranslation;
+  translationPackage =
+    if translationCfg.enable
+    then translationCfg.package
+    else null;
   whitelist = builtins.fromJSON (builtins.readFile ./whitelist.json);
   whitelistRules = map (device: device.rule) whitelist.devices;
   repoWhitelistRulesText = lib.concatLines whitelistRules;
@@ -24,7 +28,8 @@
           pkgs.usbutils
           pkgs.libnotify
           pkgs.yad
-        ] ++ lib.optional translationCfg.enable translationCfg.package)}"
+        ]
+        ++ lib.optional (translationPackage != null) translationPackage)}"
     '';
   };
   usbguardControl = pkgs.writeShellApplication {
@@ -88,6 +93,8 @@ in {
       systemd.services.usbguard.preStart = lib.mkBefore ''
         whitelist_file=${pkgs.writeText "usbguard-whitelist-rules" repoWhitelistRulesText}
         rules_file=/var/lib/usbguard/rules.conf
+        persisted_blacklist_file=/var/lib/usbguard/blacklist.json
+        user_blacklist_file=/home/${username}/.local/state/usbguard-review/blacklist.json
         dynamic_builtins_file="$(${pkgs.coreutils}/bin/mktemp)"
         filtered_rules_file="$(${pkgs.coreutils}/bin/mktemp)"
 
@@ -125,6 +132,9 @@ in {
         tmp_rules="$(${pkgs.coreutils}/bin/mktemp)"
         ${pkgs.coreutils}/bin/cat "$dynamic_builtins_file" "$whitelist_file" "$filtered_rules_file" | ${pkgs.gawk}/bin/awk 'NF && !seen[$0]++' > "$tmp_rules"
         ${pkgs.coreutils}/bin/install -m 0600 "$tmp_rules" "$rules_file"
+        if [ -f "$user_blacklist_file" ] && [ ! -f "$persisted_blacklist_file" ]; then
+          ${pkgs.coreutils}/bin/install -D -m 0600 "$user_blacklist_file" "$persisted_blacklist_file"
+        fi
         ${pkgs.coreutils}/bin/rm -f "$dynamic_builtins_file"
         ${pkgs.coreutils}/bin/rm -f "$filtered_rules_file"
         ${pkgs.coreutils}/bin/rm -f "$tmp_rules"
@@ -179,17 +189,30 @@ in {
               "USBGUARD_LSUSB_TIMEOUT_SECONDS=2.5"
               "USBGUARD_SERIAL_QUEUE_MODE=1"
               "USBGUARD_DISABLE_DOCK_GROUPING=0"
+              "USBGUARD_PERSISTENT_BLACKLIST_JSON=/var/lib/usbguard/blacklist.json"
               "USBGUARD_QUEUE_POLL_SECONDS=2"
               "USBGUARD_QUEUE_DORMANT_BACKLOG=12"
               "USBGUARD_QUEUE_DORMANT_SLEEP_SECONDS=4"
               "USBGUARD_REVIEW_AUTO_PROMPT=1"
-              "USBGUARD_REVIEW_AUTO_BLOCK_STORAGE=${if cfg.review.autoBlockStorage then "1" else "0"}"
-              "USBGUARD_REVIEW_POPUPS=${if cfg.notifyUser then "1" else "0"}"
-              "CUSTOM_UI_TRANSLATION_ENABLE=${if translationCfg.enable then "1" else "0"}"
+              "USBGUARD_REVIEW_AUTO_BLOCK_STORAGE=${
+                if cfg.review.autoBlockStorage
+                then "1"
+                else "0"
+              }"
+              "USBGUARD_REVIEW_POPUPS=${
+                if cfg.notifyUser
+                then "1"
+                else "0"
+              }"
+              "CUSTOM_UI_TRANSLATION_ENABLE=${
+                if translationCfg.enable
+                then "1"
+                else "0"
+              }"
               "CUSTOM_UI_TRANSLATION_PROVIDER=${translationCfg.provider}"
               "CUSTOM_UI_TRANSLATION_SOURCE_LANGUAGE=${translationCfg.sourceLanguage}"
-              "CUSTOM_UI_TRANSLATE_BIN=${translationCfg.package}/bin/custom-ui-translate"
             ]
+            ++ lib.optional (translationPackage != null) "CUSTOM_UI_TRANSLATE_BIN=${translationPackage}/bin/custom-ui-translate"
             ++ lib.optional (translationCfg.targetLanguage != null) "CUSTOM_UI_TRANSLATION_TARGET_LANGUAGE=${translationCfg.targetLanguage}"
             ++ lib.optional (translationCfg.apiKeyFile != null) "CUSTOM_UI_TRANSLATION_API_KEY_FILE=${toString translationCfg.apiKeyFile}";
           ExecStart = "${usbguardControl}/bin/usb-guard --watch";

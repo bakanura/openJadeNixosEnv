@@ -24,16 +24,19 @@ nhl_repo_root() {
 }
 
 nhl_patch_flake_identity() {
+  # Backward-compatible helper name. It now writes host identity JSON.
   # Args: $1 = repo root, $2 = hostName, $3 = username
   local repoRoot="$1"
   local hostName="$2"
   local installUsername="$3"
-  local flakeFile="${repoRoot}/flake.nix"
+  local identityFile="${repoRoot}/hosts/${hostName}/identity.json"
 
-  [ -f "$flakeFile" ] || return 1
-
-  sed -i -E '0,/(^\s*host\s*=\s*")([^"]*)(";)/s//\1'"$hostName"'\3/' "$flakeFile"
-  sed -i -E '0,/(^\s*username\s*=\s*")([^"]*)(";)/s//\1'"$installUsername"'\3/' "$flakeFile"
+  mkdir -p "$(dirname "$identityFile")"
+  cat >"$identityFile" <<EOF
+{
+  "username": "$installUsername"
+}
+EOF
 }
 
 nhl_print_postinstall_notes() {
@@ -153,11 +156,8 @@ nhl_derive_hostname() {
 
 nhl_prompt_hostname() {
   local default_prefix="${1:-RISIQ}"
-  local default_mode="${NHL_STATE_HOSTNAME_MODE:-prefix-serial}"
   local serial=""
   local serial_clean=""
-  local mode_prompt="[p]refix+serial / [c]ustom name"
-  local mode_default="p"
   local mode=""
   local prefix=""
   local custom=""
@@ -168,22 +168,44 @@ nhl_prompt_hostname() {
     serial_clean="UNKNOWN"
   fi
 
-  if [ "$default_mode" = "custom" ]; then
-    mode_default="c"
-  fi
-
-  mode=$(nhl_read_input "Choose hostname style ${mode_prompt}: [${mode_default}] " "$mode_default")
-  if printf "%s" "$mode" | grep -qi '^c'; then
-    custom=$(nhl_read_input "Enter the exact hostname to use (no serial will be appended): " "${NHL_STATE_HOSTNAME_VALUE:-}")
-    export NHL_SELECTED_HOSTNAME_MODE="custom"
-    export NHL_SELECTED_HOSTNAME_VALUE="$(nhl_sanitize_hostname "$custom")"
+  if nhl_is_noninteractive; then
+    export NHL_SELECTED_HOSTNAME_MODE="prefix-serial"
+    export NHL_SELECTED_HOSTNAME_PREFIX="$(nhl_sanitize_hostname "${NHL_STATE_HOSTNAME_PREFIX:-$default_prefix}")"
+    export NHL_SELECTED_HOSTNAME_VALUE="$(nhl_derive_hostname "${NHL_SELECTED_HOSTNAME_PREFIX}")"
     printf "%s\n" "${NHL_SELECTED_HOSTNAME_VALUE}"
     return 0
   fi
 
-  prefix=$(nhl_read_input "Enter hostname prefix to combine with this device serial (${serial_clean}): " "${NHL_STATE_HOSTNAME_PREFIX:-$default_prefix}")
+  while true; do
+    mode=$(nhl_read_input "Choose hostname style: [s]yntax + serial / [u]nique name (required): " "")
+    if printf "%s" "$mode" | grep -qi '^[uUcC]'; then
+      custom=$(nhl_read_input "Enter the exact hostname to use (no serial will be appended): " "${NHL_STATE_HOSTNAME_VALUE:-}")
+      custom=$(nhl_sanitize_hostname "$custom")
+      if [ -z "$custom" ] || [ "$custom" = "RISIQ-UNKNOWN" ]; then
+        echo "[WARN] Please enter a non-empty hostname."
+        continue
+      fi
+      export NHL_SELECTED_HOSTNAME_MODE="custom"
+      export NHL_SELECTED_HOSTNAME_VALUE="$custom"
+      printf "%s\n" "${NHL_SELECTED_HOSTNAME_VALUE}"
+      return 0
+    fi
+    if printf "%s" "$mode" | grep -qi '^[sSpP]'; then
+      break
+    fi
+    echo "[WARN] Please choose 's' for syntax + serial or 'u' for a unique hostname."
+  done
+
+  while true; do
+    prefix=$(nhl_read_input "Enter the hostname syntax/prefix to combine with this device serial (${serial_clean}): " "${NHL_STATE_HOSTNAME_PREFIX:-$default_prefix}")
+    prefix=$(nhl_sanitize_hostname "$prefix")
+    if [ -n "$prefix" ] && [ "$prefix" != "RISIQ-UNKNOWN" ]; then
+      break
+    fi
+    echo "[WARN] Please enter a non-empty hostname syntax/prefix."
+  done
   export NHL_SELECTED_HOSTNAME_MODE="prefix-serial"
-  export NHL_SELECTED_HOSTNAME_PREFIX="$(nhl_sanitize_hostname "$prefix")"
+  export NHL_SELECTED_HOSTNAME_PREFIX="$prefix"
   export NHL_SELECTED_HOSTNAME_VALUE="$(nhl_derive_hostname "${NHL_SELECTED_HOSTNAME_PREFIX}")"
   printf "%s\n" "${NHL_SELECTED_HOSTNAME_VALUE}"
 }
@@ -192,7 +214,7 @@ nhl_preflight_install_repo() {
   local repoRoot="${1:-$(pwd)}"
   local missing=0
 
-  for path in flake.nix install.sh auto-install.sh hosts/default/config.nix hosts/default/variables.nix scripts/lib/install-common.sh; do
+  for path in flake.nix install.sh auto-install.sh hosts/default/config.nix hosts/default/variables.nix hosts/default/users.nix hosts/default/packages-fonts.nix hosts/default/hardware.nix scripts/lib/install-common.sh; do
     if [ ! -e "${repoRoot}/${path}" ]; then
       echo "[ERROR] Missing required installer path: ${path}"
       missing=1
@@ -201,6 +223,29 @@ nhl_preflight_install_repo() {
 
   if [ "$missing" -ne 0 ]; then
     return 1
+  fi
+
+  return 0
+}
+
+nhl_preflight_fresh_install_target() {
+  # Args: $1 = repo root, $2 = hostName
+  local repoRoot="$1"
+  local hostName="$2"
+  local hostDir="${repoRoot}/hosts/${hostName}"
+
+  if [ ! -d "${repoRoot}/hosts/default" ]; then
+    echo "[ERROR] Missing hosts/default template directory."
+    return 1
+  fi
+
+  if [ -e "$hostDir" ] && [ ! -d "$hostDir" ]; then
+    echo "[ERROR] Target host path exists but is not a directory: $hostDir"
+    return 1
+  fi
+
+  if [ -d "$hostDir" ] && [ -z "$(find "$hostDir" -maxdepth 1 -type f 2>/dev/null)" ]; then
+    echo "[WARN] Target host directory exists but looks incomplete: $hostDir"
   fi
 
   return 0

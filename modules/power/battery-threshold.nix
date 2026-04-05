@@ -44,8 +44,8 @@ in {
 
     systemd.services.risiq-battery-charge-threshold = {
       description = "Apply battery charge threshold defaults";
-      wantedBy = [ "multi-user.target" ];
-      after = [ "local-fs.target" ];
+      wantedBy = ["multi-user.target"];
+      after = ["local-fs.target"];
       serviceConfig = {
         Type = "oneshot";
       };
@@ -61,7 +61,7 @@ in {
           fi
         done
       '';
-      path = [ pkgs.bash ];
+      path = [pkgs.bash];
     };
   };
 }

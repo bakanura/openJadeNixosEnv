@@ -2,28 +2,26 @@
   pkgs,
   pkgsUnstable ? null,
   ...
-}:
-let
+}: let
   onePasswordSource =
-    if pkgsUnstable != null then pkgsUnstable else pkgs;
+    if pkgsUnstable != null
+    then pkgsUnstable
+    else pkgs;
   onePasswordGuiPkg =
-    if builtins.hasAttr "_1password-gui-beta" onePasswordSource then
-      onePasswordSource._1password-gui-beta
-    else if builtins.hasAttr "_1password-gui" onePasswordSource then
-      onePasswordSource._1password-gui
-    else if builtins.hasAttr "_1password-gui-beta" pkgs then
-      pkgs._1password-gui-beta
-    else
-      pkgs._1password-gui;
+    if builtins.hasAttr "_1password-gui-beta" onePasswordSource
+    then onePasswordSource._1password-gui-beta
+    else if builtins.hasAttr "_1password-gui" onePasswordSource
+    then onePasswordSource._1password-gui
+    else if builtins.hasAttr "_1password-gui-beta" pkgs
+    then pkgs._1password-gui-beta
+    else pkgs._1password-gui;
 in {
+  imports = [
+    ./aider-ollama.nix
+  ];
+
   services = {
     power-profiles-daemon.enable = true;
-    ollama = {
-        enable = true;
-        loadModels = [
-            "qwen2.5-coder:7b"
-        ];
-    };
   };
   programs = {
     hyprland = {
@@ -54,7 +52,6 @@ in {
     neovim = {
       enable = true;
       defaultEditor = false;
-
     };
 
     thunar.enable = true;
@@ -69,7 +66,7 @@ in {
     _1password-gui = {
       enable = true;
       package = onePasswordGuiPkg;
-      polkitPolicyOwners = [ "roederp" ];
+      polkitPolicyOwners = ["roederp"];
     };
   };
 

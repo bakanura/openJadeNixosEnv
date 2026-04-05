@@ -3,34 +3,39 @@
   config,
   pkgsUnstable ? null,
   ...
-}:
-let
+}: let
   cudaEnabled = config.drivers.nvidia.enable || config.drivers.nvidia-prime.enable;
-  onePasswordSource = if pkgsUnstable != null then pkgsUnstable else pkgs;
-  wineSource = if pkgsUnstable != null then pkgsUnstable else pkgs;
-  onePasswordGuiPkg = if builtins.hasAttr "_1password-gui-beta" onePasswordSource then
-    onePasswordSource._1password-gui-beta
-  else if builtins.hasAttr "_1password-gui" onePasswordSource then
-    onePasswordSource._1password-gui
-  else if builtins.hasAttr "_1password-gui-beta" pkgs then
-    pkgs._1password-gui-beta
-  else
-    pkgs._1password-gui;
-  winePkgBase = if builtins.hasAttr "wineWow64Packages" wineSource && builtins.hasAttr "stagingFull" wineSource.wineWow64Packages then
-    wineSource.wineWow64Packages.stagingFull
-  else
-    pkgs.wineWow64Packages.stagingFull;
+  onePasswordSource =
+    if pkgsUnstable != null
+    then pkgsUnstable
+    else pkgs;
+  wineSource =
+    if pkgsUnstable != null
+    then pkgsUnstable
+    else pkgs;
+  onePasswordGuiPkg =
+    if builtins.hasAttr "_1password-gui-beta" onePasswordSource
+    then onePasswordSource._1password-gui-beta
+    else if builtins.hasAttr "_1password-gui" onePasswordSource
+    then onePasswordSource._1password-gui
+    else if builtins.hasAttr "_1password-gui-beta" pkgs
+    then pkgs._1password-gui-beta
+    else pkgs._1password-gui;
+  winePkgBase =
+    if builtins.hasAttr "wineWow64Packages" wineSource && builtins.hasAttr "stagingFull" wineSource.wineWow64Packages
+    then wineSource.wineWow64Packages.stagingFull
+    else pkgs.wineWow64Packages.stagingFull;
   winePkg = winePkgBase.override {
     embedInstallers = true;
   };
-  nvtopPackage = if cudaEnabled then
-    pkgs.nvtopPackages.full
-  else if builtins.hasAttr "amd" pkgs.nvtopPackages then
-    pkgs.nvtopPackages.amd
-  else if builtins.hasAttr "intel" pkgs.nvtopPackages then
-    pkgs.nvtopPackages.intel
-  else
-    pkgs.nvtopPackages.full;
+  nvtopPackage =
+    if cudaEnabled
+    then pkgs.nvtopPackages.full
+    else if builtins.hasAttr "amd" pkgs.nvtopPackages
+    then pkgs.nvtopPackages.amd
+    else if builtins.hasAttr "intel" pkgs.nvtopPackages
+    then pkgs.nvtopPackages.intel
+    else pkgs.nvtopPackages.full;
   wineRun = pkgs.writeShellScriptBin "wine-run" ''
     set -euo pipefail
 
@@ -75,7 +80,6 @@ in {
   environment.systemPackages = with pkgs; [
     loupe
     appimage-run
-    aider-chat
     bc
     brightnessctl
     (btop.override {
@@ -109,7 +113,6 @@ in {
     glib
     gsettings-qt
     git
-    ollama
     firefox
     gnome-system-monitor
     fastfetch
@@ -132,7 +135,7 @@ in {
     libnotify
     libsForQt5.qtstyleplugin-kvantum
     libsForQt5.qt5ct
-    (mpv.override { scripts = [ mpvScripts.mpris ]; })
+    (mpv.override {scripts = [mpvScripts.mpris];})
     nvtopPackage
     openssl
     pciutils

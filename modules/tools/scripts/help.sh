@@ -13,7 +13,7 @@ fi
 scripts_dir="__SCRIPTS_DIR__"
 
 extra_rows=(
-  $'usb-guard\t--review --watch --queue --approve ID [--permanent] --release ID|all --audit\tUnified USBGuard review, unblock/release, queue, and audit control.\tusb-guard --queue'
+  $'usb-guard\t--review --watch --queue --approve ID [--permanent] --release UUID --audit\tUnified USBGuard review, unblock/release, queue, and audit control.\tusb-guard --queue'
 )
 
 escape_markup() {

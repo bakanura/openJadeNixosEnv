@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # HELP_CMD=update
-# HELP_FLAGS=[--firmware] [--rebuild] [--quiet-summary|--full-summary] [--verbose-build]
+# HELP_FLAGS=[--firmware|-f|firmware] [--rebuild|-r|rebuild] [--quiet-summary|-q|quiet] [--full-summary|-F|full] [--verbose-build|-v|verbose]
 # HELP_DESC=Unified updater: refresh flake inputs, firmware only, or update and rebuild with --rebuild.
-# HELP_EXAMPLE=update --rebuild --full-summary
+# HELP_EXAMPLE=update -r --full-summary
 set -euo pipefail
 
 cd "__REPO_ROOT__"
@@ -45,7 +45,11 @@ start_spinner() {
         current_msg="$(pick_rebuild_message)"
       fi
       c="${chars:i%4:1}"
-      printf '\r\033[2K[%s] %s' "$c" "$current_msg" >&2
+      if [ "$rotate_quotes" = "1" ] && [ "$i" -lt 84 ]; then
+        printf '\r\033[2K[%s] %s' "$c" "$msg" >&2
+      else
+        printf '\r\033[2K[%s] %s' "$c" "$current_msg" >&2
+      fi
       i=$((i + 1))
       sleep 0.12
     done
@@ -105,24 +109,24 @@ PY
 
 while [ "$#" -gt 0 ]; do
   case "$1" in
-    --firmware)
+    --firmware|-f|firmware)
       run_firmware=1
       ;;
-    --rebuild)
+    --rebuild|-r|rebuild)
       run_rebuild=1
       ;;
-    --quiet-summary)
+    --quiet-summary|-q|quiet)
       summary_mode="quiet"
       ;;
-    --full-summary)
+    --full-summary|-F|full)
       summary_mode="full"
       ;;
-    --verbose-build)
+    --verbose-build|-v|verbose)
       build_mode="verbose"
       ;;
     *)
       echo "[ERROR] Unknown flag: $1"
-      echo "Usage: update [--firmware] [--rebuild] [--quiet-summary|--full-summary] [--verbose-build]"
+      echo "Usage: update [--firmware|-f|firmware] [--rebuild|-r|rebuild] [--quiet-summary|-q|quiet|--full-summary|-F|full] [--verbose-build|-v|verbose]"
       exit 1
       ;;
   esac
@@ -172,7 +176,7 @@ ensure_sudo_session() {
 git add . >/dev/null 2>&1 || true
 
 before_system="$(readlink -f /run/current-system || true)"
-runtime_host="$(sed -n 's/^[[:space:]]*host[[:space:]]*=[[:space:]]*"\([^"]\+\)".*/\1/p' flake.nix | head -n1)"
+runtime_host="$(hostnamectl --static 2>/dev/null || cat /etc/hostname 2>/dev/null || true)"
 if [ -z "$runtime_host" ]; then
   runtime_host="__DEFAULT_HOST__"
 fi
@@ -203,8 +207,6 @@ if [ "$run_rebuild" -eq 0 ]; then
 fi
 
 echo "[INFO] Starting rebuild for host: $runtime_host"
-echo "[INFO] Build mode: $build_mode"
-echo "[INFO] Summary mode: $summary_mode"
 
 ensure_sudo_session
 

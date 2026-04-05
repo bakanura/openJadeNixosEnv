@@ -10,6 +10,13 @@ displaylink-*.zip
 # Installer runtime state (generated per machine)
 hosts/*/.installer-state.json
 hosts/*/.nhl-enrolled
+hosts/*/.hardware-probe.json
+hosts/*/.install-log
+
+# Local helper state
+GTK-themes-icons/
+NixOS-Hyprland-backups/
+*.hm-bak
 
 # Python cache / bytecode
 __pycache__/

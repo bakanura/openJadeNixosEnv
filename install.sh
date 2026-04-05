@@ -95,6 +95,10 @@ echo "$NOTE Selected hostname: $hostName"
 
 echo "-----"
 
+if type nhl_preflight_fresh_install_target >/dev/null 2>&1; then
+    nhl_preflight_fresh_install_target "${REPO_ROOT}" "$hostName" || exit 1
+fi
+
 # Reuse an existing host profile when the device is already enrolled.
 is_enrolled=0
 if type nhl_is_enrolled_device >/dev/null 2>&1 && nhl_is_enrolled_device "$hostName"; then
@@ -157,8 +161,6 @@ else
 fi
 if type nhl_patch_flake_identity >/dev/null 2>&1; then
     nhl_patch_flake_identity "$REPO_ROOT" "$hostName" "$installusername"
-else
-    sed -i 's/username\s*=\s*"\([^"]*\)"/username = "'"$installusername"'"/' ./flake.nix
 fi
 
 echo "$NOTE Generating hardware configuration"
@@ -219,15 +221,11 @@ echo "$NOTE Applying required Nix settings before installation"
 git config --global user.name "installer"
 git config --global user.email "installer@gmail.com"
 git add .
-# Update the flake identity (host + username).
+# Update the host identity metadata (username for this host).
 if type nhl_patch_flake_identity >/dev/null 2>&1; then
     nhl_patch_flake_identity "$REPO_ROOT" "$hostName" "$installusername"
-else
-    sed -i -E '0,/(^\s*host\s*=\s*")([^"]*)(";)/s//\1'"$hostName"'\3/' ./flake.nix
 fi
-# Verify the update.
-echo "$OK Hostname updated in flake.nix:"
-grep -E "^[[:space:]]*host[[:space:]]*=" ./flake.nix | head -1 || true
+echo "$OK Host identity written to hosts/$hostName/identity.json"
 
 printf "\n%.0s" {1..2}
 

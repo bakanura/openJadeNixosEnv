@@ -98,7 +98,7 @@ in {
     };
 
     package = lib.mkOption {
-      type = lib.types.package;
+      type = lib.types.nullOr lib.types.package;
       readOnly = true;
       description = "Generated helper package for custom UI translation.";
     };

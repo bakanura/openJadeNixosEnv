@@ -208,7 +208,7 @@ func loadCfg() cfg {
 		Popups:              envBool("USBGUARD_REVIEW_POPUPS", false),
 		StateDir:            filepath.Join(stateHome, "usbguard-review"),
 		WhitelistPath:       strings.TrimSpace(os.Getenv("USBGUARD_WHITELIST_JSON")),
-		BlacklistPath:       filepath.Join(stateHome, "usbguard-review", "blacklist.json"),
+		BlacklistPath:       firstNonEmpty(strings.TrimSpace(os.Getenv("USBGUARD_PERSISTENT_BLACKLIST_JSON")), filepath.Join(stateHome, "usbguard-review", "blacklist.json")),
 	}
 }
 
@@ -821,7 +821,7 @@ func promptSingleYad(trusted map[string]string, dev device) (string, error) {
 func promptGroupYad(group []device) (string, []string, error) {
 	rows := make([]string, 0, len(group)*4)
 	for _, item := range group {
-		rows = append(rows, "TRUE", item.ID, displayName(item), riskLevel(item))
+		rows = append(rows, "TRUE", item.ID, displayName(item), riskLabelMarkup(riskLevel(item)))
 	}
 
 	for {
@@ -834,6 +834,7 @@ func promptGroupYad(group []device) (string, []string, error) {
 			"--text-align=left",
 			"--list",
 			"--checklist",
+			"--use-markup",
 			"--separator=|",
 			"--print-column=2",
 			"--column=Allow:CHK",
@@ -1071,6 +1072,17 @@ func promptBannerGroup(group []device) string {
 	return fmt.Sprintf("<span foreground=\"#f6c177\" weight=\"bold\">Review the dock as one item. This group contains %d attached dock subdevice(s). Storage and HID devices are reviewed separately. Unticked entries stay blocked.</span>", len(group))
 }
 
+func riskLabelMarkup(risk string) string {
+	switch risk {
+	case "High":
+		return "<span foreground=\"#ff6b6b\">danger</span>"
+	case "Medium":
+		return "<span foreground=\"#f6c177\">safe-ish</span>"
+	default:
+		return "<span foreground=\"#98c379\">safe</span>"
+	}
+}
+
 func suspiciousNotes(dev device) []string {
 	notes := []string{}
 	name := strings.ToLower(strings.TrimSpace(dev.Name))
@@ -1173,8 +1185,17 @@ func looksLikeDock(dev device) bool {
 		"parade",
 		"genesys",
 		"ethernet",
+		"lan",
 		"card reader",
 		"rtl8153",
+		"rtl8156",
+		"realtek",
+		"asix",
+		"ax88179",
+		"lan78",
+		"cdc ncm",
+		"cdc ecm",
+		"rndis",
 		"usb 10/100/1000 lan",
 	}
 	obviousNonDockMarkers := []string{
@@ -1523,15 +1544,7 @@ func persistedRuleRiskMarkup(item struct {
 	Risk  string `json:"risk,omitempty"`
 	Rule  string `json:"rule"`
 }) string {
-	risk := persistedRuleRisk(item)
-	switch risk {
-	case "High":
-		return "<span foreground=\"#ff6b6b\">High</span>"
-	case "Medium":
-		return "<span foreground=\"#f6c177\">Medium</span>"
-	default:
-		return "<span foreground=\"#98c379\">Low</span>"
-	}
+	return riskLabelMarkup(persistedRuleRisk(item))
 }
 
 func releasePersistentBlockByUUID(c cfg, uuid string) (bool, error) {
@@ -1582,7 +1595,7 @@ func promptReleasePersistentBlocksCLI(c cfg) error {
 		if uuid == "" {
 			uuid = persistentRuleUUID(item.Rule)
 		}
-		fmt.Printf("  [%s] %s (%s)\n", uuid, persistedRuleDisplayName(item.Label), persistedRuleRisk(item))
+		fmt.Printf("  [%s] %s (%s)\n", uuid, persistedRuleDisplayName(item.Label), strings.ToLower(persistedRuleRisk(item)))
 	}
 	fmt.Print("Enter UUIDs to release, separated by spaces, or leave blank to cancel: ")
 	reader := bufio.NewReader(os.Stdin)
@@ -1634,7 +1647,7 @@ func promptReleasePersistentBlocksYad(c cfg) error {
 		"--width=980",
 		"--height=520",
 		"--center",
-		"--text=<span foreground=\"#f6c177\" weight=\"bold\">Select persistent blocked devices to release back into the approval queue. Unticked entries stay blocked.</span>",
+		"--text=<span foreground=\"#f6c177\" weight=\"bold\">Select persistent blocked devices to release back into the approval queue. Unticked entries stay blocked.</span>\n<span foreground=\"#98c379\">safe</span> <span foreground=\"#f6c177\">safe-ish</span> <span foreground=\"#ff6b6b\">danger</span>",
 		"--text-align=left",
 		"--list",
 		"--checklist",
@@ -1655,6 +1668,9 @@ func promptReleasePersistentBlocksYad(c cfg) error {
 	switch exitCode(err) {
 	case 0:
 		selected := parseSelectedIDs(string(output))
+		if len(selected) == 0 {
+			return nil
+		}
 		for _, uuid := range selected {
 			if _, err := releasePersistentBlockByUUID(c, uuid); err != nil {
 				return err

@@ -26,62 +26,62 @@
   ],
   "quote": {
     "jobs": [
-      "Rebuilding NixOS for $runtime_host... Steve Jobs once said: stay hungry, stay foolish.",
-      "Rebuilding NixOS for $runtime_host... one more thing: the modules compiled.",
-      "Rebuilding NixOS for $runtime_host... insanely great, pending successful switch.",
-      "Rebuilding NixOS for $runtime_host... real artists ship clean flakes.",
-      "Rebuilding NixOS for $runtime_host... simplicity is the ultimate sudo.",
-      "Rebuilding NixOS for $runtime_host... innovation distinguishes between a user and an updater.",
-      "Rebuilding NixOS for $runtime_host... the people crazy enough to edit `config.nix` do move desktops forward."
+      "Rebuilding NixOS for $runtime_host... Steve Jobs once said: stay hungry, stay foolish...",
+      "Rebuilding NixOS for $runtime_host... one more thing: the modules compiled...",
+      "Rebuilding NixOS for $runtime_host... insanely great, pending successful switch...",
+      "Rebuilding NixOS for $runtime_host... real artists ship clean flakes...",
+      "Rebuilding NixOS for $runtime_host... simplicity is the ultimate sudo...",
+      "Rebuilding NixOS for $runtime_host... innovation distinguishes between a user and an updater...",
+      "Rebuilding NixOS for $runtime_host... the people crazy enough to edit `config.nix` do move desktops forward..."
     ],
     "star-wars": [
-      "Rebuilding NixOS for $runtime_host... may the source be with you."
+      "Rebuilding NixOS for $runtime_host... may the source be with you..."
     ],
     "back-to-the-future": [
-      "Rebuilding NixOS for $runtime_host... road? where we're switching, we need no roadmaps."
+      "Rebuilding NixOS for $runtime_host... road? where we're switching, we need no roadmaps..."
     ],
     "matrix": [
-      "Rebuilding NixOS for $runtime_host... there is no spoon, only `/nix/store`."
+      "Rebuilding NixOS for $runtime_host... there is no spoon, only `/nix/store`..."
     ],
     "jerry-maguire": [
-      "Rebuilding NixOS for $runtime_host... show me the binaries."
+      "Rebuilding NixOS for $runtime_host... show me the binaries..."
     ],
     "casablanca": [
-      "Rebuilding NixOS for $runtime_host... here's looking at cached derivations, kid.",
-      "Rebuilding NixOS for $runtime_host... we'll always have `/run/current-system`."
+      "Rebuilding NixOS for $runtime_host... here's looking at cached derivations, kid...",
+      "Rebuilding NixOS for $runtime_host... we'll always have `/run/current-system`..."
     ],
     "gone-with-the-wind": [
-      "Rebuilding NixOS for $runtime_host... frankly my dear, the flake still evaluates."
+      "Rebuilding NixOS for $runtime_host... frankly my dear, the flake still evaluates..."
     ],
     "apollo-13": [
-      "Rebuilding NixOS for $runtime_host... Houston, we have a config."
+      "Rebuilding NixOS for $runtime_host... Houston, we have a config..."
     ],
     "apocalypse-now": [
-      "Rebuilding NixOS for $runtime_host... I love the smell of fresh generations."
+      "Rebuilding NixOS for $runtime_host... I love the smell of fresh rebuilds..."
     ],
     "dirty-harry": [
-      "Rebuilding NixOS for $runtime_host... go ahead, make my system."
+      "Rebuilding NixOS for $runtime_host... go ahead, make my system..."
     ],
     "toy-story": [
-      "Rebuilding NixOS for $runtime_host... to infinity and a new generation."
+      "Rebuilding NixOS for $runtime_host... to infinity and a new generation..."
     ],
     "godfather": [
-      "Rebuilding NixOS for $runtime_host... keep your friends close and your rollback closer."
+      "Rebuilding NixOS for $runtime_host... keep your friends close and your rollback closer..."
     ],
     "shining": [
-      "Rebuilding NixOS for $runtime_host... here's Johnny, with another module import."
+      "Rebuilding NixOS for $runtime_host... here's Johnny, with another module import..."
     ],
     "sherlock": [
-      "Rebuilding NixOS for $runtime_host... elementary, my dear package set."
+      "Rebuilding NixOS for $runtime_host... elementary, my dear package set..."
     ],
     "monty-python": [
-      "Rebuilding NixOS for $runtime_host... nobody expects the immutable configuration."
+      "Rebuilding NixOS for $runtime_host... nobody expects the immutable configuration..."
     ],
     "x-files": [
-      "Rebuilding NixOS for $runtime_host... the truth is out there, probably in the build log."
+      "Rebuilding NixOS for $runtime_host... the truth is out there, probably in the build log..."
     ],
     "jfk": [
-      "Rebuilding NixOS for $runtime_host... we choose to rebuild, not because it is easy, but because the old generation was crusty."
+      "Rebuilding NixOS for $runtime_host... we choose to rebuild, not because it is easy, but because the old generation was crusty..."
     ]
   },
   "gremlin": [

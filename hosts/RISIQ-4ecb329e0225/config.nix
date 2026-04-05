@@ -32,7 +32,7 @@
         usbguard list-devices 2>/dev/null           | ${pkgs.gawk}/bin/awk '
               $2 == "allow" { print tolower($0) }
             '           | ${pkgs.gnugrep}/bin/grep -Eq '
-              with-connect-type "(hotplug|unknown)".*(name ".*(dock|docking|hub|billboard|displaylink|ethernet|card reader)"|with-interface \{?([^}]*09:|[^}]*11:|[^}]*02:06:00|[^}]*0a:|[^}]*08:06:50))
+              with-connect-type "(hotplug|unknown)".*(name ".*(dock|docking|hub|billboard|displaylink|ethernet|lan|realtek|rtl815[36]|asix|ax88179|card reader)"|with-interface \{?([^}]*09:|[^}]*11:|[^}]*02:06:00|[^}]*0a:|[^}]*08:06:50))
             '
       }
 
@@ -210,9 +210,15 @@ in {
   local.entra.enable = true;
   local.customUiTranslation = {
     enable = true;
-    targetLanguage = if keyboardLayout == "de" then "DE" else null;
+    targetLanguage =
+      if keyboardLayout == "de"
+      then "DE"
+      else null;
     apiKeyFile = "/home/${username}/.config/deepl-api-key";
-    encryptedApiKeyFile = if builtins.pathExists deeplSecretFile then deeplSecretFile else null;
+    encryptedApiKeyFile =
+      if builtins.pathExists deeplSecretFile
+      then deeplSecretFile
+      else null;
   };
 
   security.tpm2.enable = true;
@@ -226,23 +232,36 @@ in {
       dispatcherScripts = [
         {
           type = "basic";
-          source = pkgs.writeShellScript "prefer-wired-eth0" ''
+          source = pkgs.writeShellScript "prefer-wired-network" ''
             set -eu
 
             interface="$1"
             status="$2"
-            wired_if="eth0"
-            wifi_if="wlp1s0"
             nmcli_bin="${pkgs.networkmanager}/bin/nmcli"
+            device_type="$("$nmcli_bin" -t -g GENERAL.TYPE device show "$interface" 2>/dev/null || true)"
 
-            [ "$interface" = "$wired_if" ] || exit 0
-
-            case "$status" in
-              up|dhcp4-change|connectivity-change)
-                "$nmcli_bin" device disconnect "$wifi_if" >/dev/null 2>&1 || true
-                ;;
-              down|pre-down)
-                "$nmcli_bin" device connect "$wifi_if" >/dev/null 2>&1 || true
+            case "$device_type" in
+              ethernet)
+                case "$status" in
+                  up|dhcp4-change|connectivity-change)
+                    "$nmcli_bin" --terse --fields DEVICE,TYPE,STATE device status \
+                      | ${pkgs.gawk}/bin/awk -F: '$2 == "wifi" && $3 != "disconnected" { print $1 }' \
+                      | while IFS= read -r wifi_if; do
+                          [ -n "$wifi_if" ] || continue
+                          "$nmcli_bin" device disconnect "$wifi_if" >/dev/null 2>&1 || true
+                        done
+                    ;;
+                  down|pre-down)
+                    if ! "$nmcli_bin" --terse --fields TYPE,STATE device status | ${pkgs.gnugrep}/bin/grep -q '^ethernet:connected$'; then
+                      "$nmcli_bin" --terse --fields DEVICE,TYPE device status \
+                        | ${pkgs.gawk}/bin/awk -F: '$2 == "wifi" { print $1 }' \
+                        | while IFS= read -r wifi_if; do
+                            [ -n "$wifi_if" ] || continue
+                            "$nmcli_bin" device connect "$wifi_if" >/dev/null 2>&1 || true
+                          done
+                    fi
+                    ;;
+                esac
                 ;;
             esac
           '';
@@ -255,7 +274,15 @@ in {
 
   # Set your time zone.
   services.automatic-timezoned.enable = false; # based on IP location
-  services.resolved.enable = true;
+  services.resolved = {
+    enable = true;
+    fallbackDns = ["1.1.1.1" "9.9.9.9"];
+    dnsovertls = "opportunistic";
+    extraConfig = ''
+      Cache=yes
+      DNSStubListener=yes
+    '';
+  };
 
   #https://en.wikipedia.org/wiki/List_of_tz_database_time_zones
 
@@ -394,9 +421,9 @@ in {
       if [ -w /sys/devices/system/cpu/amd_pstate/max_perf_pct ]; then
         # Keep a calmer baseline on AC, and prioritize battery life when unplugged.
         if [ "$ac_online" = "1" ]; then
-          echo 65 > /sys/devices/system/cpu/amd_pstate/max_perf_pct || true
+          echo 85 > /sys/devices/system/cpu/amd_pstate/max_perf_pct || true
         else
-          echo 55 > /sys/devices/system/cpu/amd_pstate/max_perf_pct || true
+          echo 65 > /sys/devices/system/cpu/amd_pstate/max_perf_pct || true
         fi
       fi
 
@@ -443,7 +470,7 @@ in {
           echo 0 > /sys/devices/system/cpu/cpufreq/boost || true
         fi
         if [ -w /sys/devices/system/cpu/amd_pstate/max_perf_pct ]; then
-          echo 55 > /sys/devices/system/cpu/amd_pstate/max_perf_pct || true
+          echo 65 > /sys/devices/system/cpu/amd_pstate/max_perf_pct || true
         fi
         echo "off" > "$state_file"
         exit 0
@@ -472,11 +499,11 @@ in {
       high_load=$((cpus * 90))
       low_load=$((cpus * 45))
 
-      # Enable threshold: util >= 70% or load >= 0.90 per CPU.
-      # Disable threshold: util <= 35% and load <= 0.45 per CPU.
-      if [ "$util" -ge 70 ] || [ "$load1_int" -ge "$high_load" ]; then
+      # Enable threshold: util >= 60% or load >= 0.90 per CPU.
+      # Disable threshold: util <= 30% and load <= 0.45 per CPU.
+      if [ "$util" -ge 60 ] || [ "$load1_int" -ge "$high_load" ]; then
         target="on"
-      elif [ "$util" -le 35 ] && [ "$load1_int" -le "$low_load" ]; then
+      elif [ "$util" -le 30 ] && [ "$load1_int" -le "$low_load" ]; then
         target="off"
       else
         target="$last_state"
@@ -494,7 +521,7 @@ in {
           echo 0 > /sys/devices/system/cpu/cpufreq/boost || true
         fi
         if [ -w /sys/devices/system/cpu/amd_pstate/max_perf_pct ]; then
-          echo 65 > /sys/devices/system/cpu/amd_pstate/max_perf_pct || true
+          echo 85 > /sys/devices/system/cpu/amd_pstate/max_perf_pct || true
         fi
       fi
 
@@ -517,8 +544,8 @@ in {
   systemd.timers.risiq-adaptive-cpu-boost = {
     wantedBy = ["timers.target"];
     timerConfig = {
-      OnBootSec = "30s";
-      OnUnitActiveSec = "15s";
+      OnBootSec = "20s";
+      OnUnitActiveSec = "8s";
       Unit = "risiq-adaptive-cpu-boost.service";
     };
   };

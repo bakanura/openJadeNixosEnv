@@ -124,6 +124,44 @@ in {
     networkmanager = {
       enable = true;
       dns = "systemd-resolved";
+      dispatcherScripts = [
+        {
+          type = "basic";
+          source = pkgs.writeShellScript "prefer-wired-network" ''
+            set -eu
+
+            interface="$1"
+            status="$2"
+            nmcli_bin="${pkgs.networkmanager}/bin/nmcli"
+            device_type="$("$nmcli_bin" -t -g GENERAL.TYPE device show "$interface" 2>/dev/null || true)"
+
+            case "$device_type" in
+              ethernet)
+                case "$status" in
+                  up|dhcp4-change|connectivity-change)
+                    "$nmcli_bin" --terse --fields DEVICE,TYPE,STATE device status \
+                      | ${pkgs.gawk}/bin/awk -F: '$2 == "wifi" && $3 != "disconnected" { print $1 }' \
+                      | while IFS= read -r wifi_if; do
+                          [ -n "$wifi_if" ] || continue
+                          "$nmcli_bin" device disconnect "$wifi_if" >/dev/null 2>&1 || true
+                        done
+                    ;;
+                  down|pre-down)
+                    if ! "$nmcli_bin" --terse --fields TYPE,STATE device status | ${pkgs.gnugrep}/bin/grep -q '^ethernet:connected$'; then
+                      "$nmcli_bin" --terse --fields DEVICE,TYPE device status \
+                        | ${pkgs.gawk}/bin/awk -F: '$2 == "wifi" { print $1 }' \
+                        | while IFS= read -r wifi_if; do
+                            [ -n "$wifi_if" ] || continue
+                            "$nmcli_bin" device connect "$wifi_if" >/dev/null 2>&1 || true
+                          done
+                    fi
+                    ;;
+                esac
+                ;;
+            esac
+          '';
+        }
+      ];
     };
     hostName = "${host}";
     timeServers = options.networking.timeServers.default ++ ["pool.ntp.org"];
@@ -131,7 +169,15 @@ in {
 
   # Set your time zone.
   services.automatic-timezoned.enable = true; # based on IP location
-  services.resolved.enable = true;
+  services.resolved = {
+    enable = true;
+    fallbackDns = ["1.1.1.1" "9.9.9.9"];
+    dnsovertls = "opportunistic";
+    extraConfig = ''
+      Cache=yes
+      DNSStubListener=yes
+    '';
+  };
 
   #https://en.wikipedia.org/wiki/List_of_tz_database_time_zones
 

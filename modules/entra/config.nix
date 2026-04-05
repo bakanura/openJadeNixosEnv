@@ -7,11 +7,26 @@
   cfg = config.local.entra;
   legacy = config.local.intune;
   managedEnabled = cfg.enable || legacy.enable;
-  managedNonInteractive = if cfg.enable then cfg.nonInteractive else legacy.nonInteractive;
-  managedDeviceId = if cfg.enable then cfg.deviceId else legacy.deviceId;
-  installPortal = if cfg.enable then cfg.installPortal else legacy.installPortal;
-  installBroker = if cfg.enable then cfg.installBroker else legacy.installBroker;
-  installEdge = if cfg.enable then cfg.installEdge else legacy.installEdge;
+  managedNonInteractive =
+    if cfg.enable
+    then cfg.nonInteractive
+    else legacy.nonInteractive;
+  managedDeviceId =
+    if cfg.enable
+    then cfg.deviceId
+    else legacy.deviceId;
+  installPortal =
+    if cfg.enable
+    then cfg.installPortal
+    else legacy.installPortal;
+  installBroker =
+    if cfg.enable
+    then cfg.installBroker
+    else legacy.installBroker;
+  installEdge =
+    if cfg.enable
+    then cfg.installEdge
+    else legacy.installEdge;
 in {
   options = {
     local.entra = {
@@ -88,7 +103,11 @@ in {
     environment.etc."risiq/entra-managed".text = "true\n";
     environment.etc."risiq/entra/managed.conf".text = ''
       enabled=true
-      non_interactive=${if managedNonInteractive then "true" else "false"}
+      non_interactive=${
+        if managedNonInteractive
+        then "true"
+        else "false"
+      }
       device_id=${managedDeviceId}
     '';
 
@@ -105,35 +124,43 @@ in {
 
     environment.systemPackages =
       [
-      (pkgs.writeShellScriptBin "entra-status" ''
-        set -euo pipefail
-        echo "ENTRA_MANAGED=''${ENTRA_MANAGED:-0}"
-        echo "ENTRA_NONINTERACTIVE=${if managedNonInteractive then "1" else "0"}"
-        echo "ENTRA_DEVICE_ID=''${ENTRA_DEVICE_ID:-}"
-        echo "INTUNE_MANAGED=''${INTUNE_MANAGED:-0}"
-        echo "NHL_NONINTERACTIVE=${if managedNonInteractive then "1" else "0"}"
-        echo "INTUNE_DEVICE_ID=''${INTUNE_DEVICE_ID:-}"
-        if [ -f /etc/risiq/entra-managed ]; then
-          echo "Marker: /etc/risiq/entra-managed present"
-        else
-          echo "Marker: /etc/risiq/entra-managed missing"
-        fi
-      '')
-      (pkgs.writeShellScriptBin "entra-enroll" ''
-        set -euo pipefail
-        echo "Launching Microsoft Intune Portal enrollment..."
-        exec intune-portal
-      '')
-      (pkgs.writeShellScriptBin "intune-status" ''
-        exec ${pkgs.bash}/bin/bash -lc 'entra-status'
-      '')
-      (pkgs.writeShellScriptBin "intune-enroll" ''
-        exec ${pkgs.bash}/bin/bash -lc 'entra-enroll'
-      '')
-      (pkgs.writeShellScriptBin "intune-portal-interactive" ''
-        exec ${pkgs.intune-portal}/bin/intune-portal --interactive "$@"
-      '')
-    ]
+        (pkgs.writeShellScriptBin "entra-status" ''
+          set -euo pipefail
+          echo "ENTRA_MANAGED=''${ENTRA_MANAGED:-0}"
+          echo "ENTRA_NONINTERACTIVE=${
+            if managedNonInteractive
+            then "1"
+            else "0"
+          }"
+          echo "ENTRA_DEVICE_ID=''${ENTRA_DEVICE_ID:-}"
+          echo "INTUNE_MANAGED=''${INTUNE_MANAGED:-0}"
+          echo "NHL_NONINTERACTIVE=${
+            if managedNonInteractive
+            then "1"
+            else "0"
+          }"
+          echo "INTUNE_DEVICE_ID=''${INTUNE_DEVICE_ID:-}"
+          if [ -f /etc/risiq/entra-managed ]; then
+            echo "Marker: /etc/risiq/entra-managed present"
+          else
+            echo "Marker: /etc/risiq/entra-managed missing"
+          fi
+        '')
+        (pkgs.writeShellScriptBin "entra-enroll" ''
+          set -euo pipefail
+          echo "Launching Microsoft Intune Portal enrollment..."
+          exec intune-portal
+        '')
+        (pkgs.writeShellScriptBin "intune-status" ''
+          exec ${pkgs.bash}/bin/bash -lc 'entra-status'
+        '')
+        (pkgs.writeShellScriptBin "intune-enroll" ''
+          exec ${pkgs.bash}/bin/bash -lc 'entra-enroll'
+        '')
+        (pkgs.writeShellScriptBin "intune-portal-interactive" ''
+          exec ${pkgs.intune-portal}/bin/intune-portal --interactive "$@"
+        '')
+      ]
       ++ lib.optionals installPortal [pkgs.intune-portal]
       ++ lib.optionals installBroker [pkgs.microsoft-identity-broker]
       ++ lib.optionals installEdge [pkgs.microsoft-edge];

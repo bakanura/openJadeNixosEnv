@@ -1,4 +1,8 @@
-{ pkgs, lib, ... }: let
+{
+  pkgs,
+  lib,
+  ...
+}: let
   installVscodeExtensions = pkgs.writeShellScriptBin "vscode-install-extensions" ''
     set -euo pipefail
 

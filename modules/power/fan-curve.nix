@@ -160,15 +160,15 @@ in {
       }
       {
         assertion =
-          cfg.strategyOnDischarging == ""
+          cfg.strategyOnDischarging
+          == ""
           || builtins.hasAttr cfg.strategyOnDischarging cfg.strategies;
         message = "local.power.fanCurve.strategyOnDischarging must be empty or exist in local.power.fanCurve.strategies.";
       }
     ];
 
     environment.etc."fw-fanctrl/config.json".text = configJson;
-    environment.etc."systemd/system-sleep/fw-fanctrl-suspend".source =
-      "${cfg.package}/share/fw-fanctrl/fw-fanctrl-suspend";
+    environment.etc."systemd/system-sleep/fw-fanctrl-suspend".source = "${cfg.package}/share/fw-fanctrl/fw-fanctrl-suspend";
 
     environment.systemPackages = [
       cfg.package
@@ -240,8 +240,8 @@ in {
 
     systemd.services.risiq-framework-fan-curve = {
       description = "Framework fan control service";
-      wantedBy = [ "multi-user.target" ];
-      after = [ "multi-user.target" ];
+      wantedBy = ["multi-user.target"];
+      after = ["multi-user.target"];
       serviceConfig = {
         Type = "simple";
         Restart = "always";
