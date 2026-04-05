@@ -31,7 +31,8 @@
         "**/.turbo" = true;
         "**/result" = true;
       };
-        
+
+      "git.confirmSync" = false;
       "npm.autoDetect" = "off";
     };
   };
