@@ -1,0 +1,161 @@
+{
+  "meme": [
+    "Rebuilding NixOS for $runtime_host... such wow.",
+    "Rebuilding NixOS for $runtime_host... very declarative, much system.",
+    "Rebuilding NixOS for $runtime_host... u still reading this, take a walk.",
+    "Rebuilding NixOS for $runtime_host... u may be excused buddy.",
+    "Rebuilding NixOS for $runtime_host... this is fine.",
+    "Rebuilding NixOS for $runtime_host... yo dawg, I heard you like updates.",
+    "Rebuilding NixOS for $runtime_host... keyboard cat is spiritually supervising.",
+    "Rebuilding NixOS for $runtime_host... party rock is in the store tonight.",
+    "Rebuilding NixOS for $runtime_host... if you build it, they will boot.",
+    "Rebuilding NixOS for $runtime_host... on Wednesdays we pin inputs.",
+    "Rebuilding NixOS for $runtime_host... the cake is probably in another derivation.",
+    "Rebuilding NixOS for $runtime_host... this spinner brought to you by early YouTube energy.",
+    "Rebuilding NixOS for $runtime_host... dancing baby approves this generation.",
+    "Rebuilding NixOS for $runtime_host... this feels extremely Y2K compliant.",
+    "Rebuilding NixOS for $runtime_host... please remain calm and pretend this is on MySpace.",
+    "Rebuilding NixOS for $runtime_host... your rebuild has entered the AIM away message era.",
+    "Rebuilding NixOS for $runtime_host... if this takes too long, blame dial-up memories.",
+    "Rebuilding NixOS for $runtime_host... parsing with the confidence of a DVD logo.",
+    "Rebuilding NixOS for $runtime_host... this machine is giving strong LAN party energy.",
+    "Rebuilding NixOS for $runtime_host... no cap, just cached.",
+    "Rebuilding NixOS for $runtime_host... away message: busy taming the host.",
+    "Rebuilding NixOS for $runtime_host... that is so fetch, but for packages.",
+    "Rebuilding NixOS for $runtime_host... you wouldn't download a car, but you would cache one."
+  ],
+  "quote": {
+    "jobs": [
+      "Rebuilding NixOS for $runtime_host... Steve Jobs once said: stay hungry, stay foolish.",
+      "Rebuilding NixOS for $runtime_host... one more thing: the modules compiled.",
+      "Rebuilding NixOS for $runtime_host... insanely great, pending successful switch.",
+      "Rebuilding NixOS for $runtime_host... real artists ship clean flakes.",
+      "Rebuilding NixOS for $runtime_host... simplicity is the ultimate sudo.",
+      "Rebuilding NixOS for $runtime_host... innovation distinguishes between a user and an updater.",
+      "Rebuilding NixOS for $runtime_host... the people crazy enough to edit `config.nix` do move desktops forward."
+    ],
+    "star-wars": [
+      "Rebuilding NixOS for $runtime_host... may the source be with you."
+    ],
+    "back-to-the-future": [
+      "Rebuilding NixOS for $runtime_host... road? where we're switching, we need no roadmaps."
+    ],
+    "matrix": [
+      "Rebuilding NixOS for $runtime_host... there is no spoon, only `/nix/store`."
+    ],
+    "jerry-maguire": [
+      "Rebuilding NixOS for $runtime_host... show me the binaries."
+    ],
+    "casablanca": [
+      "Rebuilding NixOS for $runtime_host... here's looking at cached derivations, kid.",
+      "Rebuilding NixOS for $runtime_host... we'll always have `/run/current-system`."
+    ],
+    "gone-with-the-wind": [
+      "Rebuilding NixOS for $runtime_host... frankly my dear, the flake still evaluates."
+    ],
+    "apollo-13": [
+      "Rebuilding NixOS for $runtime_host... Houston, we have a config."
+    ],
+    "apocalypse-now": [
+      "Rebuilding NixOS for $runtime_host... I love the smell of fresh generations."
+    ],
+    "dirty-harry": [
+      "Rebuilding NixOS for $runtime_host... go ahead, make my system."
+    ],
+    "toy-story": [
+      "Rebuilding NixOS for $runtime_host... to infinity and a new generation."
+    ],
+    "godfather": [
+      "Rebuilding NixOS for $runtime_host... keep your friends close and your rollback closer."
+    ],
+    "shining": [
+      "Rebuilding NixOS for $runtime_host... here's Johnny, with another module import."
+    ],
+    "sherlock": [
+      "Rebuilding NixOS for $runtime_host... elementary, my dear package set."
+    ],
+    "monty-python": [
+      "Rebuilding NixOS for $runtime_host... nobody expects the immutable configuration."
+    ],
+    "x-files": [
+      "Rebuilding NixOS for $runtime_host... the truth is out there, probably in the build log."
+    ],
+    "jfk": [
+      "Rebuilding NixOS for $runtime_host... we choose to rebuild, not because it is easy, but because the old generation was crusty."
+    ]
+  },
+  "gremlin": [
+    "Rebuilding NixOS for $runtime_host... one does not simply avoid rebuilds.",
+    "Rebuilding NixOS for $runtime_host... all your base are belong to us.",
+    "Rebuilding NixOS for $runtime_host... keep calm and blame the flake.",
+    "Rebuilding NixOS for $runtime_host... brace yourselves, generations are coming.",
+    "Rebuilding NixOS for $runtime_host... arrow to the knee, but make it reproducible.",
+    "Rebuilding NixOS for $runtime_host... not sure if build, or just coffee-powered wizardry.",
+    "Rebuilding NixOS for $runtime_host... the rebuild abides.",
+    "Rebuilding NixOS for $runtime_host... as if.",
+    "Rebuilding NixOS for $runtime_host... talk to the hand, unresolved deps.",
+    "Rebuilding NixOS for $runtime_host... wax on, flakes off.",
+    "Rebuilding NixOS for $runtime_host... nobody makes the packages in the corner.",
+    "Rebuilding NixOS for $runtime_host... welcome to the rebuild jungle.",
+    "Rebuilding NixOS for $runtime_host... life moves pretty fast, so does this spinner.",
+    "Rebuilding NixOS for $runtime_host... I am serious, and don't call me during eval.",
+    "Rebuilding NixOS for $runtime_host... the first rule of rebuild club is check the logs.",
+    "Rebuilding NixOS for $runtime_host... say hello to my little closure diff.",
+    "Rebuilding NixOS for $runtime_host... nobody puts Nix in a mutable corner.",
+    "Rebuilding NixOS for $runtime_host... apparently this machine chose violence and reproducibility.",
+    "Rebuilding NixOS for $runtime_host... cue dramatic reboot montage.",
+    "Rebuilding NixOS for $runtime_host... this build goes to eleven.",
+    "Rebuilding NixOS for $runtime_host... stop trying to make runtime drift happen.",
+    "Rebuilding NixOS for $runtime_host... praise the cache.",
+    "Rebuilding NixOS for $runtime_host... loading retro computing vibes.",
+    "Rebuilding NixOS for $runtime_host... be kind, rewind, rebuild.",
+    "Rebuilding NixOS for $runtime_host... someone set up us the package.",
+    "Rebuilding NixOS for $runtime_host... no floppy disks were harmed.",
+    "Rebuilding NixOS for $runtime_host... modem noises but make it modern.",
+    "Rebuilding NixOS for $runtime_host... status: busy compiling, send a nudge later.",
+    "Rebuilding NixOS for $runtime_host... BRB, becoming one with the closure.",
+    "Rebuilding NixOS for $runtime_host... this build is powered by ringtone-era confidence.",
+    "Rebuilding NixOS for $runtime_host... one ping only, one switch ideally.",
+    "Rebuilding NixOS for $runtime_host... gentlemen, start your package managers.",
+    "Rebuilding NixOS for $runtime_host... no fate but what we declare.",
+    "Rebuilding NixOS for $runtime_host... engage dramatic thinking pose.",
+    "Rebuilding NixOS for $runtime_host... this mission is impossible, except in Nix.",
+    "Rebuilding NixOS for $runtime_host... there can be only one current-system symlink.",
+    "Rebuilding NixOS for $runtime_host... maybe the real update was the logs we made along the way.",
+    "Rebuilding NixOS for $runtime_host... if anyone asks, this is cinema.",
+    "Rebuilding NixOS for $runtime_host... a rebuild is never late, only eventually cached.",
+    "Rebuilding NixOS for $runtime_host... just when I thought I was out, the flake pulled me back in.",
+    "Rebuilding NixOS for $runtime_host... we'll always have `/run/current-system`.",
+    "Rebuilding NixOS for $runtime_host... the system is calling from inside the store.",
+    "Rebuilding NixOS for $runtime_host... fasten your seatbelt, it's going to be a nerdy night.",
+    "Rebuilding NixOS for $runtime_host... some like it hot, but not the CPU during eval.",
+    "Rebuilding NixOS for $runtime_host... the spinner is strong with this one.",
+    "Rebuilding NixOS for $runtime_host... this build has main character energy.",
+    "Rebuilding NixOS for $runtime_host... another day, another carefully curated symlink.",
+    "Rebuilding NixOS for $runtime_host... this is your pilot speaking, we are now climbing to generation plus one.",
+    "Rebuilding NixOS for $runtime_host... low-key iconic, high-key rebuilding.",
+    "Rebuilding NixOS for $runtime_host... if this spinner had a soundtrack, it would be synths.",
+    "Rebuilding NixOS for $runtime_host... reboot and let reboot.",
+    "Rebuilding NixOS for $runtime_host... panic is temporary, rollbacks are forever.",
+    "Rebuilding NixOS for $runtime_host... do not cite the old memes to me, I was there.",
+    "Rebuilding NixOS for $runtime_host... this is what peak desktop engineering looks like.",
+    "Rebuilding NixOS for $runtime_host... think different, but reproducibly.",
+    "Rebuilding NixOS for $runtime_host... your future self called and wants fewer mutable surprises.",
+    "Rebuilding NixOS for $runtime_host... this would look great on a keynote slide.",
+    "Rebuilding NixOS for $runtime_host... minimal UI, maximal package graph.",
+    "Rebuilding NixOS for $runtime_host... somewhere a turtleneck approves.",
+    "Rebuilding NixOS for $runtime_host... retro meme density approaching critical levels.",
+    "Rebuilding NixOS for $runtime_host... this one is for the forum signatures and neon avatars.",
+    "Rebuilding NixOS for $runtime_host... if the spinner hits the corner exactly, we all win.",
+    "Rebuilding NixOS for $runtime_host... keep your arms inside the closure at all times.",
+    "Rebuilding NixOS for $runtime_host... this generation is sponsored by caffeine and optimism.",
+    "Rebuilding NixOS for $runtime_host... absolute cinema, relative symlinks.",
+    "Rebuilding NixOS for $runtime_host... this host is built different, literally.",
+    "Rebuilding NixOS for $runtime_host... take a breath, sip water, let the derivations cook.",
+    "Rebuilding NixOS for $runtime_host... if in doubt, add another module and act confident.",
+    "Rebuilding NixOS for $runtime_host... this spinner has seen things.",
+    "Rebuilding NixOS for $runtime_host... the rebuild is coming from inside the terminal.",
+    "Rebuilding NixOS for $runtime_host... odds of drama reduced by declarative configuration.",
+    "Rebuilding NixOS for $runtime_host... no thoughts, head empty, just `nh os switch`."
+  ]
+}

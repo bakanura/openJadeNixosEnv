@@ -32,15 +32,20 @@ trap cleanup EXIT INT TERM
 
 start_spinner() {
   local msg="${1:-Working...}"
+  local rotate_quotes="${2:-0}"
   stop_spinner || true
   SPINNER_MSG="$msg"
 
   (
     chars='|/-\'
     i=0
+    current_msg="$msg"
     while true; do
+      if [ "$rotate_quotes" = "1" ] && [ $((i % 84)) -eq 0 ]; then
+        current_msg="$(pick_rebuild_message)"
+      fi
       c="${chars:i%4:1}"
-      printf '\r[%s] %s' "$c" "$msg"
+      printf '\r\033[2K[%s] %s' "$c" "$current_msg"
       i=$((i + 1))
       sleep 0.12
     done
@@ -55,6 +60,44 @@ stop_spinner() {
     SPINNER_PID=""
     printf '\r\033[2K'
   fi
+}
+
+pick_rebuild_message() {
+  local json_path
+  json_path="$PWD/modules/tools/scripts/rebuild-messages.json"
+
+  if ! command -v python3 >/dev/null 2>&1; then
+    printf '%s\n' "Rebuilding NixOS for ${runtime_host:-this-host}... such wow."
+    return 0
+  fi
+
+  python3 - "$json_path" "${runtime_host:-this-host}" <<'PY'
+import json
+import random
+import sys
+from pathlib import Path
+
+json_path = Path(sys.argv[1])
+host = sys.argv[2]
+
+data = json.loads(json_path.read_text())
+messages = []
+
+for key, values in data.items():
+    if isinstance(values, list):
+        messages.extend(values)
+    elif isinstance(values, dict):
+        for tagged_values in values.values():
+            if isinstance(tagged_values, list):
+                messages.extend(tagged_values)
+
+if not messages:
+    print(f"Rebuilding NixOS for {host}... such wow.")
+    raise SystemExit(0)
+
+message = random.choice(messages).replace("$runtime_host", host)
+print(message)
+PY
 }
 
 while [ "$#" -gt 0 ]; do
@@ -174,7 +217,7 @@ else
   echo "[INFO] Quiet mode enabled. Live build output is hidden."
   echo "[INFO] Writing full build log to: $build_log"
 
-  start_spinner "Rebuilding NixOS for $runtime_host..."
+  start_spinner "$(pick_rebuild_message)" "1"
 
   if ! nh os switch -u -H "$runtime_host" . >"$build_log" 2>&1; then
     stop_spinner
