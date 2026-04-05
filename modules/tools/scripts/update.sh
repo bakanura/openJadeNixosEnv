@@ -41,7 +41,7 @@ start_spinner() {
     i=0
     current_msg="$msg"
     while true; do
-      if [ "$rotate_quotes" = "1" ] && [ $((i % 84)) -eq 0 ]; then
+      if [ "$rotate_quotes" = "1" ] && [ "$i" -ge 84 ] && [ $(((i - 84) % 84)) -eq 0 ]; then
         current_msg="$(pick_rebuild_message)"
       fi
       c="${chars:i%4:1}"
@@ -217,7 +217,7 @@ else
   echo "[INFO] Quiet mode enabled. Live build output is hidden."
   echo "[INFO] Writing full build log to: $build_log"
 
-  start_spinner "$(pick_rebuild_message)" "1"
+  start_spinner "Rebuilding NixOS for $runtime_host..." "1"
 
   if ! nh os switch -u -H "$runtime_host" . >"$build_log" 2>&1; then
     stop_spinner
