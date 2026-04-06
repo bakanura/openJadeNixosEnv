@@ -17,7 +17,7 @@
     else pkgs._1password-gui;
 in {
   imports = [
-    ./aider-ollama.nix
+    ./claw-ollama.nix
   ];
 
   services = {

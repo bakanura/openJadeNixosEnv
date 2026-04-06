@@ -221,8 +221,6 @@ in {
     #};
   };
 
-  security.sudo.wheelNeedsPassword = false;
-
   systemd.services.flatpak-repo = {
     path = [pkgs.flatpak];
     script = ''

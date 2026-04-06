@@ -20,6 +20,7 @@ NixOS-Hyprland-backups/
 .codex
 .codex/
 .aider.conf.yml
+.claw/
 
 # Python cache / bytecode
 __pycache__/

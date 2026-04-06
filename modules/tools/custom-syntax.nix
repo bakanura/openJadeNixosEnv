@@ -16,6 +16,7 @@
     ["__DEFAULT_HOST__" "__REPO_ROOT__"]
     [host repoRoot]
     (builtins.readFile ./scripts/rebuild.sh);
+  clawbuddyScript = builtins.readFile ./scripts/clawbuddy.sh;
   lamabuddyScript = builtins.readFile ./scripts/lamabuddy.sh;
   helpScript =
     builtins.replaceStrings
@@ -30,6 +31,7 @@ in {
     # Update and rebuild helpers.
     (pkgs.writeShellScriptBin "update" updateScript)
     (pkgs.writeShellScriptBin "rebuild" rebuildScript)
+    (pkgs.writeShellScriptBin "clawbuddy" clawbuddyScript)
     (pkgs.writeShellScriptBin "lamabuddy" lamabuddyScript)
     (pkgs.writeShellScriptBin "cleanup" (builtins.readFile ./scripts/cleanup.sh))
 

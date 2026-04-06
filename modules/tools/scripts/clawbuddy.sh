@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
-# HELP_CMD=lamabuddy
+# HELP_CMD=clawbuddy
 # HELP_FLAGS=[claw arguments...]
-# HELP_DESC=Compatibility alias for clawbuddy; launches Claw Code Local against the local Ollama server.
-# HELP_EXAMPLE=lamabuddy
+# HELP_DESC=Launch Claw Code Local against the local Ollama server with the default qwen2.5-coder profile.
+# HELP_EXAMPLE=clawbuddy
 set -euo pipefail
 
 export OPENAI_API_KEY="ollama"

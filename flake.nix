@@ -65,9 +65,11 @@
       };
     };
     waybarWeatherPkg = pkgs.callPackage ./pkgs/waybar-weather.nix {};
+    clawCodeLocalPkg = pkgs.callPackage ./pkgs/claw-code-local.nix {};
   in {
     packages.${system} = {
       waybar-weather = waybarWeatherPkg;
+      claw-code-local = clawCodeLocalPkg;
     };
     nixosConfigurations = builtins.listToAttrs (
       map

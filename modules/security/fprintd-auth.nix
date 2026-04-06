@@ -18,6 +18,7 @@ in {
       hyprlock.fprintAuth = true;
       ly.fprintAuth = true;
       login.fprintAuth = true;
+      sudo.fprintAuth = true;
       swaylock.fprintAuth = true;
     };
 

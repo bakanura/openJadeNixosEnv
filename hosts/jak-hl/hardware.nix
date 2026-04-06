@@ -42,5 +42,4 @@
   swapDevices = [{device = "/dev/disk/by-uuid/5c3ee7b1-89ff-4a74-b39f-fac8f15eef99";}];
 
   nixpkgs.hostPlatform = lib.mkDefault "x86_64-linux";
-  security.sudo.wheelNeedsPassword = false;
 }

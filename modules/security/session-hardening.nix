@@ -30,6 +30,10 @@ in {
       local.security.session.enable = lib.mkDefault true;
     }
     (lib.mkIf cfg.enable {
+      # Require authentication for the first sudo use in a session unless a
+      # host explicitly and intentionally overrides it.
+      security.sudo.wheelNeedsPassword = lib.mkDefault true;
+
       # Keep sleep targets enabled and explicit so suspend/hibernate actions are available.
       systemd.sleep.extraConfig = ''
         AllowSuspend=yes
