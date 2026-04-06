@@ -24,7 +24,6 @@
       "betajob.modulestf"
       "cosmicnight.cosmic-night"
       "endormi.2077-theme"
-      "openai.chatgpt"
       "pydemia.cobalt9"
 
       # Dev Containers / Docker / infra
@@ -81,8 +80,21 @@ in {
   home.activation.vscodeExtensionsAutoInstall = lib.hm.dag.entryAfter ["writeBoundary"] ''
     marker="$HOME/.local/state/vscode-extensions-synced.done"
     mkdir -p "$HOME/.local/state"
+    code_bin=""
 
-    if [ ! -f "$marker" ] && (command -v code >/dev/null 2>&1 || [ -x /run/current-system/sw/bin/code ]); then
+    if command -v code >/dev/null 2>&1; then
+      code_bin="$(command -v code)"
+    elif [ -x /run/current-system/sw/bin/code ]; then
+      code_bin="/run/current-system/sw/bin/code"
+    fi
+
+    # This repo is meant to stay local-first; remove the ChatGPT extension if it
+    # was installed by an earlier activation.
+    if [ -n "$code_bin" ]; then
+      "$code_bin" --uninstall-extension openai.chatgpt --force >/dev/null 2>&1 || true
+    fi
+
+    if [ ! -f "$marker" ] && [ -n "$code_bin" ]; then
       # Avoid duplicate background workers across quick successive activations.
       if ! pgrep -f "vscode-install-extensions" >/dev/null 2>&1; then
         (

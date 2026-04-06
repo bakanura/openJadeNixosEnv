@@ -15,6 +15,7 @@ in {
     set -eu
     DEST="$HOME/.config/quickshell/overview"
     SRC="${overviewSource}"
+    ROOT_SHELL="$HOME/.config/quickshell/shell.qml"
 
     mkdir -p "$HOME/.config/quickshell"
     # Remove old directory and copy fresh (ensures QML updates are picked up)
@@ -22,10 +23,24 @@ in {
     cp -R "$SRC" "$DEST"
     chmod -R u+rwX "$DEST"
 
-    # Remove default shell.qml if it exists (prevents named config detection)
-    # Quickshell disables subdirectory detection if ~/.config/quickshell/shell.qml exists
-    if [ -f "$HOME/.config/quickshell/shell.qml" ]; then
-      rm -f "$HOME/.config/quickshell/shell.qml"
-    fi
+    # Keep a default entry point so plain `qs` still works right after a rebuild.
+    cat > "$ROOT_SHELL" <<'EOF'
+//@ pragma UseQApplication
+//@ pragma Env QT_QUICK_CONTROLS_STYLE=Basic
+
+import "./overview/modules/overview/"
+import "./overview/services/"
+import "./overview/common/"
+import "./overview/common/functions/"
+import "./overview/common/widgets/"
+
+import QtQuick
+import Quickshell
+import Quickshell.Hyprland
+
+ShellRoot {
+    Overview {}
+}
+EOF
   '';
 }

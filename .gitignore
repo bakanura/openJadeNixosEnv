@@ -17,6 +17,9 @@ hosts/*/.install-log
 GTK-themes-icons/
 NixOS-Hyprland-backups/
 *.hm-bak
+.codex
+.codex/
+.aider.conf.yml
 
 # Python cache / bytecode
 __pycache__/
