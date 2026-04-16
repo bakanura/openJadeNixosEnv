@@ -3,18 +3,6 @@
   pkgsUnstable ? null,
   ...
 }: let
-  onePasswordSource =
-    if pkgsUnstable != null
-    then pkgsUnstable
-    else pkgs;
-  onePasswordGuiPkg =
-    if builtins.hasAttr "_1password-gui-beta" onePasswordSource
-    then onePasswordSource._1password-gui-beta
-    else if builtins.hasAttr "_1password-gui" onePasswordSource
-    then onePasswordSource._1password-gui
-    else if builtins.hasAttr "_1password-gui-beta" pkgs
-    then pkgs._1password-gui-beta
-    else pkgs._1password-gui;
 in {
   imports = [
     ./claw-ollama.nix
@@ -63,11 +51,6 @@ in {
       xfce.tumbler
     ];
 
-    _1password-gui = {
-      enable = true;
-      package = onePasswordGuiPkg;
-      polkitPolicyOwners = ["roederp"];
-    };
   };
 
   nixpkgs.config.allowUnfree = true;

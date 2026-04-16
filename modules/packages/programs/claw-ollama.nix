@@ -20,19 +20,7 @@
     nativeBuildInputs = [pkgs.makeWrapper];
     postBuild = ''
       wrapProgram "$out/bin/claw" \
-        --run '
-          if [ "$EUID" -ne 0 ]; then
-            SUDO_BIN="/run/wrappers/bin/sudo"
-            if [ ! -x "$SUDO_BIN" ]; then
-              SUDO_BIN="${pkgs.sudo}/bin/sudo"
-            fi
-
-            "$SUDO_BIN" -K >/dev/null 2>&1 || true
-            "$SUDO_BIN" -k >/dev/null 2>&1 || true
-            "$SUDO_BIN" -v
-            "$SUDO_BIN" -K >/dev/null 2>&1 || true
-          fi
-        ' \
+        --add-flags '--permission-mode workspace-write' \
         --set OPENAI_API_KEY ollama \
         --set OPENAI_BASE_URL http://127.0.0.1:11434/v1 \
         --unset ANTHROPIC_API_KEY \

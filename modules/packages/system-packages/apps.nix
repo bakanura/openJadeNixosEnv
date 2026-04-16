@@ -5,22 +5,10 @@
   ...
 }: let
   cudaEnabled = config.drivers.nvidia.enable || config.drivers.nvidia-prime.enable;
-  onePasswordSource =
-    if pkgsUnstable != null
-    then pkgsUnstable
-    else pkgs;
   wineSource =
     if pkgsUnstable != null
     then pkgsUnstable
     else pkgs;
-  onePasswordGuiPkg =
-    if builtins.hasAttr "_1password-gui-beta" onePasswordSource
-    then onePasswordSource._1password-gui-beta
-    else if builtins.hasAttr "_1password-gui" onePasswordSource
-    then onePasswordSource._1password-gui
-    else if builtins.hasAttr "_1password-gui-beta" pkgs
-    then pkgs._1password-gui-beta
-    else pkgs._1password-gui;
   winePkgBase =
     if builtins.hasAttr "wineWow64Packages" wineSource && builtins.hasAttr "stagingFull" wineSource.wineWow64Packages
     then wineSource.wineWow64Packages.stagingFull
@@ -78,6 +66,7 @@
   '';
 in {
   environment.systemPackages = with pkgs; [
+    android-tools
     loupe
     appimage-run
     bc
@@ -174,6 +163,5 @@ in {
     yt-dlp
     dxvk
     gamemode
-    onePasswordGuiPkg
   ];
 }

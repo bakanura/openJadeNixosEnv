@@ -5,5 +5,6 @@
     nh
     powershell
     vscode
+    azure-cli
   ];
 }

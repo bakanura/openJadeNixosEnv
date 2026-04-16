@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # HELP_CMD=lamabuddy
 # HELP_FLAGS=[claw arguments...]
-# HELP_DESC=Compatibility alias for clawbuddy; launches Claw Code Local against the local Ollama server.
+# HELP_DESC=Compatibility alias for clawbuddy; launches Claw Code Local against the local Ollama server in workspace-write mode.
 # HELP_EXAMPLE=lamabuddy
 set -euo pipefail
 
@@ -18,8 +18,13 @@ unset XAI_API_KEY
 unset GROQ_API_KEY
 unset MISTRAL_API_KEY
 
-if [ "$#" -eq 0 ]; then
-  exec claw --model qwen2.5-coder:7b
+if [ "${PWD:-}" = "${HOME:-}" ]; then
+  printf '%s\n' "lamabuddy is starting from \$HOME, so the current workspace is your whole home directory." >&2
+  printf '%s\n' "Tip: cd into a repo or project first if you want narrower access." >&2
 fi
 
-exec claw --model qwen2.5-coder:7b "$@"
+if [ "$#" -eq 0 ]; then
+  exec claw --permission-mode workspace-write --model qwen2.5-coder:7b
+fi
+
+exec claw --permission-mode workspace-write --model qwen2.5-coder:7b "$@"

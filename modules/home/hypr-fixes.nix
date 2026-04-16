@@ -93,6 +93,28 @@
 
     action="''${1:-menu}"
 
+    show_auth_prompt() {
+      local title="$1"
+      local body="$2"
+
+      if command -v yad >/dev/null 2>&1; then
+        yad \
+          --center \
+          --on-top \
+          --width=460 \
+          --title="$title" \
+          --window-icon=system-shutdown \
+          --image=dialog-password \
+          --question \
+          --text="$body" \
+          --button="Cancel:1" \
+          --button="Continue:0"
+        return $?
+      fi
+
+      return 0
+    }
+
     case "$action" in
       menu)
         exec "$HOME/.config/hypr/scripts/Wlogout.sh"
@@ -101,12 +123,21 @@
         exec "$HOME/.config/hypr/scripts/LockScreen.sh"
         ;;
       logout)
+        show_auth_prompt \
+          "Confirm logout" \
+          "You're about to log out.\n\nIf an authentication prompt appears next, present your fingerprint right away or enter your password.\n\nContinue?"
         exec hyprctl dispatch exit 0
         ;;
       reboot)
+        show_auth_prompt \
+          "Confirm reboot" \
+          "Reboot needs authentication on this system.\n\nPress Continue, then present your fingerprint immediately or enter your password in the next prompt.\n\nContinue?"
         exec sh -c 'loginctl reboot || systemctl reboot'
         ;;
       shutdown|poweroff)
+        show_auth_prompt \
+          "Confirm shutdown" \
+          "Shutdown needs authentication on this system.\n\nPress Continue, then present your fingerprint immediately or enter your password in the next prompt.\n\nContinue?"
         exec sh -c 'loginctl poweroff || systemctl poweroff'
         ;;
       suspend)
