@@ -23,6 +23,8 @@ in {
         "lp"
         "video"
         "input"
+        "render"
+        "usbguard"
         "audio"
       ];
 

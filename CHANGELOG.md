@@ -7,6 +7,8 @@ A technical record of notable changes. Dates are in UTC.
 - Added Go-based USBGuard review flow and unified `usb-guard` control command
 - Added persistent USB block/release support and dock-aware grouped review prompts
 - Tightened Hyprland self-healing for duplicate keybinds and terminal conflicts
+- Fixed Ollama GPU backend errors and optimized `clawbuddy` connectivity
+- Added `lamabuddy` AI wrapper for local Llama-based assistance
 - Added terminal launcher fallback and volume-control shortcut repair
 - Unified helper command documentation under metadata-driven `helpme`
 - Merged firmware handling into the `update` command and made rebuild accessible through `update --rebuild`

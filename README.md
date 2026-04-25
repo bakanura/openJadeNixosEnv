@@ -108,7 +108,7 @@ In-repo installer (after clone):
 ### 3) Rebuild manually
 
 ```bash
-sudo nixos-rebuild switch --flake .#<host>
+update --rebuild
 ```
 
 ## Installer workflows

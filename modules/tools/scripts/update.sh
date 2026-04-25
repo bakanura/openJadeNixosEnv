@@ -8,6 +8,16 @@ set -euo pipefail
 cd "__REPO_ROOT__"
 export NIX_CONFIG=$'experimental-features = nix-command flakes\nwarn-dirty = false'
 
+# Detect GitHub CLI token to avoid 403 rate limit errors during flake updates
+if command -v gh >/dev/null 2>&1; then
+  GH_TOKEN=$(gh auth token 2>/dev/null || true)
+  if [ -n "$GH_TOKEN" ]; then
+    echo "[INFO] Using GitHub CLI token for authenticated flake updates."
+    export NIX_CONFIG="${NIX_CONFIG}
+access-tokens = github.com=${GH_TOKEN}"
+  fi
+fi
+
 summary_mode="normal"
 build_mode="quiet"
 run_firmware=0
@@ -41,14 +51,20 @@ start_spinner() {
     i=0
     current_msg="$msg"
     while true; do
+      # Determine terminal width to prevent wrapping bugs
+      cols=$(tput cols 2>/dev/null || echo 80)
+      max_width=$((cols - 10))
+
       if [ "$rotate_quotes" = "1" ] && [ "$i" -ge 84 ] && [ $(((i - 84) % 84)) -eq 0 ]; then
         current_msg="$(pick_rebuild_message)"
       fi
+
+      display_msg="${current_msg:0:$max_width}"
       c="${chars:i%4:1}"
       if [ "$rotate_quotes" = "1" ] && [ "$i" -lt 84 ]; then
-        printf '\r\033[2K[%s] %s' "$c" "$msg" >&2
+        printf '\r\033[2K[%s] %s' "$c" "${msg:0:$max_width}" >&2
       else
-        printf '\r\033[2K[%s] %s' "$c" "$current_msg" >&2
+        printf '\r\033[2K[%s] %s' "$c" "$display_msg" >&2
       fi
       i=$((i + 1))
       sleep 0.12

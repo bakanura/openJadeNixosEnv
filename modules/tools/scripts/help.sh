@@ -12,10 +12,6 @@ fi
 
 scripts_dir="__SCRIPTS_DIR__"
 
-extra_rows=(
-  $'usb-guard\t--review --watch --queue --approve ID [--permanent] --release UUID --audit\tUnified USBGuard review, unblock/release, queue, and audit control.\tusb-guard --queue'
-)
-
 escape_markup() {
   local s=${1:-}
   s=${s//&/&amp;}
@@ -34,6 +30,20 @@ append_row() {
   local desc="$3"
   local example="$4"
   rows+=("$(printf '%s\t%s\t%s\t%s' "$cmd" "$flags" "$desc" "$example")")
+}
+
+load_json_rows() {
+  local json_file="${scripts_dir}/help_commands.json"
+  
+  if [ ! -f "$json_file" ]; then
+    return
+  fi
+
+  if command -v jq >/dev/null 2>&1; then
+    while IFS=$'\t' read -r c f d e; do
+      append_row "$c" "$f" "$d" "$e"
+    done < <(jq -r '.[] | [.cmd, .flags, .desc, .example] | @tsv' "$json_file")
+  fi
 }
 
 load_rows() {
@@ -70,10 +80,7 @@ load_rows() {
     done < <(find "$scripts_dir" -maxdepth 1 -type f -name '*.sh' -print0 | sort -z)
   fi
 
-  local row
-  for row in "${extra_rows[@]}"; do
-    rows+=("$row")
-  done
+  load_json_rows
 }
 
 print_text_table() {

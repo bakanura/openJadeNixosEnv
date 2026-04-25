@@ -38,8 +38,8 @@ This repo is a NixOS flake that assembles a Hyprland-based desktop and a small H
   - `modules/desktop/` for the desktop/session layer.
   - `modules/drivers/` for GPU profiles.
   - `modules/hardware/` for hardware helpers.
-  - `modules/packages/` for package composition.
-  - `modules/tools/` for custom helper commands and wrapper scripts.
+  - `modules/packages/` for system-wide package composition.
+  - `modules/tools/` for custom helpers (update, cleanup, thermal tools, and `clawbuddy` AI wrappers).
   - `modules/security/` for fingerprint/session/USB policies.
   - `modules/power/`, `modules/custom-ui/`, `modules/entra/`, and `modules/home/` for the remaining focused areas.
 
@@ -58,3 +58,12 @@ This repo is a NixOS flake that assembles a Hyprland-based desktop and a small H
 - There is no dedicated unit/integration test suite.
 - Use `nixos-rebuild dry-activate` and `nix flake check` for validation.
 - Nix formatting is handled via `nix fmt`.
+
+## Troubleshooting Ollama (clawbuddy/lamabuddy)
+
+If you see `llama runner process has terminated` (500 error):
+1. Check if the correct GPU driver is enabled in `hosts/<host>/config.nix`.
+2. Verify the Ollama service is using that driver: `systemctl status ollama.service`.
+3. Ensure your user (e.g., `roederp`) is in the `video` and `render` groups in `users.nix`.
+4. On AMD GPUs, you **must** set `services.ollama.rocmOverrideGfx = "10.3.0";` in your host config to prevent the runner from crashing.
+5. Run `journalctl -u ollama.service -f` while launching `clawbuddy` to see specific library load errors.

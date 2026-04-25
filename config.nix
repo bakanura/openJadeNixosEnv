@@ -361,6 +361,10 @@ in {
 
     upower.enable = true;
 
+    dbus.packages = [
+      pkgs.gcr # Provides the GUI prompt for the keyring if auto-unlock fails
+    ];
+
     gnome.gnome-keyring.enable = true;
 
     ollama = {
@@ -557,21 +561,11 @@ in {
 
   systemd.user.services.usbguard-reviewer = {
     description = "USBGuard Reviewer (Automatic Popups)";
-    wantedBy = ["graphical-session.target" "default.target"];
-    partOf = ["graphical-session.target"];
+    wantedBy = ["default.target"];
     serviceConfig = {
       Type = "simple";
-      # Poll the systemd environment and export variables once Hyprland is ready
-      ExecStart = pkgs.writeShellScript "usbguard-reviewer-start" ''
-        while true; do
-          if env_vars=$(${pkgs.systemd}/bin/systemctl --user show-environment) && echo "$env_vars" | grep -q "WAYLAND_DISPLAY="; then
-            eval "export $(echo "$env_vars" | grep -E '^(WAYLAND_DISPLAY|DISPLAY|XDG_RUNTIME_DIR|DBUS_SESSION_BUS_ADDRESS)=')"
-            break
-          fi
-          sleep 2
-        done
-        exec usb-guard --watch
-      '';
+      # Wait for Wayland to be ready so yad popups have a display to bind to
+      ExecStart = "${pkgs.bash}/bin/bash -c 'while [ -z \"$WAYLAND_DISPLAY\" ]; do sleep 1; done; usb-guard --watch'";
       Restart = "always";
       RestartSec = "5s";
     };
@@ -655,6 +649,10 @@ in {
       })
     '';
   };
+
+  # Auto-unlock the gnome-keyring on login
+  security.pam.services.login.enableGnomeKeyring = true;
+
   security.pam.services.swaylock = {
     text = ''
       auth include login

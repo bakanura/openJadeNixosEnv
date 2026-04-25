@@ -34,7 +34,9 @@ in {
         "**/result" = true;
       };
 
-      "git.confirmSync" = hostVars.vscodeGitConfirmSync or true;
+      "git.confirmSync" = false;
+      "git.autofetch" = true;
+      "git.enableSmartCommit" = true;
       "npm.autoDetect" = "off";
     };
   };

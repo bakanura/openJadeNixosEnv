@@ -1,0 +1,28 @@
+[
+  {
+    "cmd": "update",
+    "flags": "--rebuild, --firmware",
+    "desc": "Unified update script: handles flake updates, firmware sync, and NixOS rebuilds via nh.",
+    "example": "update --rebuild"
+  },
+  {
+    "cmd": "usb-guard",
+    "flags": "--review, --watch, --queue, --approve ID [--permanent], --audit",
+    "desc": "Unified USBGuard control: review blocked devices, manage the queue, or release persistent blocks.",
+    "example": "usb-guard --review"
+  },
+  {
+    "cmd": "clawbuddy",
+    "desc": "AI assistant wrapper using local Ollama (qwen2.5-coder); optimized for system engineering tasks.",
+    "example": "clawbuddy 'how do I check my nix store path?'"
+  },
+  {
+    "cmd": "lamabuddy",
+    "desc": "Local AI assistant wrapper focused on privacy-centric Llama models.",
+    "example": "lamabuddy 'explain this bash script'"
+  },
+  {
+    "cmd": "helpme",
+    "desc": "Show the custom command library; opens a GUI list when available."
+  }
+]

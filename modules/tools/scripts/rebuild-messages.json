@@ -38,7 +38,7 @@
       "Rebuilding NixOS for $runtime_host... may the source be with you..."
     ],
     "back-to-the-future": [
-      "Rebuilding NixOS for $runtime_host... road? where we're switching, we need no roadmaps..."
+      "Rebuilding NixOS for $runtime_host... roadmaps? where we're switching, we need no roadmaps..."
     ],
     "matrix": [
       "Rebuilding NixOS for $runtime_host... there is no spoon, only `/nix/store`..."
@@ -81,7 +81,7 @@
       "Rebuilding NixOS for $runtime_host... the truth is out there, probably in the build log..."
     ],
     "jfk": [
-      "Rebuilding NixOS for $runtime_host... we choose to rebuild, not because it is easy, but because the old generation was crusty..."
+      "Rebuilding NixOS for $runtime_host... we choose to rebuild, not because it is easy, but because the old generation was crusty."
     ]
   },
   "gremlin": [
