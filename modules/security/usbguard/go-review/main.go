@@ -194,6 +194,10 @@ func loadCfg() cfg {
 		home, _ := os.UserHomeDir()
 		stateHome = filepath.Join(home, ".local", "state")
 	}
+	runtimeDir := strings.TrimSpace(os.Getenv("XDG_RUNTIME_DIR"))
+	if runtimeDir == "" {
+		runtimeDir = stateHome
+	}
 	return cfg{
 		MaxBlockedScan:      envInt("USBGUARD_MAX_BLOCKED_SCAN", 64),
 		MaxPromptsPerCycle:  envInt("USBGUARD_MAX_PROMPTS_PER_CYCLE", 1),
@@ -208,7 +212,7 @@ func loadCfg() cfg {
 		AutoBlockStorage:    envBool("USBGUARD_REVIEW_AUTO_BLOCK_STORAGE", true),
 		Popups:              envBool("USBGUARD_REVIEW_POPUPS", true),
 		StateDir:            filepath.Join(stateHome, "usbguard-review"),
-		AllowedPath:         firstNonEmpty(strings.TrimSpace(os.Getenv("USBGUARD_PERSISTENT_ALLOWED_JSON")), filepath.Join(stateHome, "usbguard-review", "allowed.json")),
+		AllowedPath:         firstNonEmpty(strings.TrimSpace(os.Getenv("USBGUARD_PERSISTENT_ALLOWED_JSON")), filepath.Join(runtimeDir, "usbguard-review", "allowed.json")),
 		WhitelistPath:       strings.TrimSpace(os.Getenv("USBGUARD_WHITELIST_JSON")),
 		BlacklistPath:       firstNonEmpty(strings.TrimSpace(os.Getenv("USBGUARD_PERSISTENT_BLACKLIST_JSON")), filepath.Join(stateHome, "usbguard-review", "blacklist.json")),
 	}

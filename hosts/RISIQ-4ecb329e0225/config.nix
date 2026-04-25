@@ -403,7 +403,7 @@ in {
     OLLAMA_DEBUG = lib.mkForce "1";
     # Force ROCm runner and help it find libraries
     OLLAMA_LLM_LIBRARY = lib.mkForce "rocm";
-    LD_LIBRARY_PATH = lib.mkForce "${pkgs.rocmPackages.clr}/lib:${pkgs.rocmPackages.hip}/lib";
+    LD_LIBRARY_PATH = lib.mkForce "${pkgs.rocmPackages.clr}/lib";
     HIP_VISIBLE_DEVICES = lib.mkForce "0";
   };
 
@@ -564,9 +564,10 @@ in {
 
   systemd.user.services.usbguard-reviewer = {
     description = "USBGuard Reviewer (Automatic Popups)";
-    wantedBy = ["default.target"];
+    after = ["graphical-session.target"];
+    wantedBy = ["graphical-session.target"];
     partOf = ["graphical-session.target"];
-    path = with pkgs; [ usbguard libnotify bash systemd gawk gnugrep coreutils ];
+    path = with pkgs; [ usbguard libnotify bash systemd gawk gnugrep coreutils hyprland config.system.path ];
     serviceConfig = {
       Type = "simple";
       # Poll the systemd environment and export variables once Hyprland is ready
@@ -663,14 +664,18 @@ in {
   };
 
   # Auto-unlock GNOME Keyring on login. 
-  # Note: Fingerprint login does not support auto-unlocking the keyring.
+  # Force password entry for login/greetd to ensure the keyring is unlocked.
+  # Fingerprint can still be used for sudo and screen locking.
   security.pam.services.login.enableGnomeKeyring = true;
+  security.pam.services.login.fprintAuth = lib.mkForce false;
   security.pam.services.greetd.enableGnomeKeyring = true;
+  security.pam.services.greetd.fprintAuth = lib.mkForce false;
+
+  security.pam.services.hyprlock.fprintAuth = lib.mkForce true;
+  security.pam.services.swaylock.fprintAuth = lib.mkForce true;
+  security.pam.services.sudo.fprintAuth = lib.mkForce true;
 
   security.pam.services.swaylock = {
-    text = ''
-      auth include login
-    '';
   };
 
   # Cachix, Optimization settings and garbage collection automation
