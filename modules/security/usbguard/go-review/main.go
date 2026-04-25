@@ -236,6 +236,13 @@ func reviewOnce(c cfg, trusted map[string]string) error {
 		if seen[key] {
 			continue
 		}
+		if label, ok := blacklistLabelForRule(allowedList, "allow "+dev.Rule); ok {
+			if err := approve(c, dev, false); err == nil {
+				fmt.Printf("Auto-approved (persistent): %s\n", firstNonEmpty(label, displayName(dev)))
+				seen[key] = true
+				continue
+			}
+		}
 		group := dockGroup(c, devices, dev)
 		if len(group) > 1 {
 			decision, selected, err := promptGroup(c, group)
@@ -322,9 +329,6 @@ func watch(c cfg, trusted map[string]string) error {
 		now := time.Now()
 
 		for _, dev := range devices {
-			if prompts >= c.MaxPromptsPerCycle {
-				break
-			}
 			key := deviceKey(dev)
 			active[key] = true
 			if grouped[key] {
@@ -365,6 +369,13 @@ func watch(c cfg, trusted map[string]string) error {
 					notify("USBGuard", fmt.Sprintf("Storage device quarantined: %s [%s]", displayName(dev), uuid))
 					continue
 				}
+			}
+
+			// Check prompt limit only for interactive prompts, not auto-approvals
+			if prompts >= c.MaxPromptsPerCycle {
+				grouped[key] = true
+				queued = append(queued, queueLabel(dev))
+				continue
 			}
 
 			if !lastPrompt.IsZero() && now.Sub(lastPrompt) < c.PromptCooldown {

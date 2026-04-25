@@ -13,7 +13,7 @@ if command -v gh >/dev/null 2>&1; then
   GH_TOKEN=$(gh auth token 2>/dev/null || echo "${GITHUB_TOKEN:-}")
   if [ -n "$GH_TOKEN" ]; then
     echo "[INFO] Using GitHub authentication for flake updates."
-    export NIX_CONFIG="${NIX_CONFIG} access-tokens=github.com=${GH_TOKEN}"
+    export NIX_CONFIG="${NIX_CONFIG}"$'\n'"access-tokens = github.com=${GH_TOKEN}"
   fi
 fi
 
