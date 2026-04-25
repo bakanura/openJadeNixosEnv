@@ -67,6 +67,7 @@ type cfg struct {
 	AutoBlockStorage    bool
 	Popups              bool
 	StateDir            string
+	AllowedPath         string
 	WhitelistPath       string
 	BlacklistPath       string
 }
@@ -197,7 +198,7 @@ func loadCfg() cfg {
 		MaxBlockedScan:      envInt("USBGUARD_MAX_BLOCKED_SCAN", 64),
 		MaxPromptsPerCycle:  envInt("USBGUARD_MAX_PROMPTS_PER_CYCLE", 1),
 		PromptCooldown:      envSeconds("USBGUARD_PROMPT_COOLDOWN_SECONDS", 2),
-		PortPromptCooldown:  envSeconds("USBGUARD_PORT_PROMPT_COOLDOWN_SECONDS", 15),
+		PortPromptCooldown:  envSeconds("USBGUARD_PORT_PROMPT_COOLDOWN_SECONDS", 3),
 		QueuePoll:           envSeconds("USBGUARD_QUEUE_POLL_SECONDS", 2),
 		QueueDormantBacklog: envInt("USBGUARD_QUEUE_DORMANT_BACKLOG", 12),
 		QueueDormantSleep:   envSeconds("USBGUARD_QUEUE_DORMANT_SLEEP_SECONDS", 4),
@@ -207,6 +208,7 @@ func loadCfg() cfg {
 		AutoBlockStorage:    envBool("USBGUARD_REVIEW_AUTO_BLOCK_STORAGE", true),
 		Popups:              envBool("USBGUARD_REVIEW_POPUPS", true),
 		StateDir:            filepath.Join(stateHome, "usbguard-review"),
+		AllowedPath:         firstNonEmpty(strings.TrimSpace(os.Getenv("USBGUARD_PERSISTENT_ALLOWED_JSON")), filepath.Join(stateHome, "usbguard-review", "allowed.json")),
 		WhitelistPath:       strings.TrimSpace(os.Getenv("USBGUARD_WHITELIST_JSON")),
 		BlacklistPath:       firstNonEmpty(strings.TrimSpace(os.Getenv("USBGUARD_PERSISTENT_BLACKLIST_JSON")), filepath.Join(stateHome, "usbguard-review", "blacklist.json")),
 	}
@@ -218,6 +220,7 @@ func reviewOnce(c cfg, trusted map[string]string) error {
 		return err
 	}
 	blacklist := loadPersistedRules(c.BlacklistPath)
+	allowedList := loadPersistedRules(c.AllowedPath)
 	if len(devices) == 0 {
 		fmt.Println("No blocked USB devices in queue.")
 		return nil
@@ -247,7 +250,7 @@ func reviewOnce(c cfg, trusted map[string]string) error {
 				}
 				switch decision {
 				case "approve-once", "approve-permanently":
-					if err := approve(item, decision == "approve-permanently"); err != nil {
+					if err := approve(c, item, decision == "approve-permanently"); err != nil {
 						return err
 					}
 					fmt.Printf("%s: %s\n", approvalPrefix(decision), displayName(item))
@@ -273,7 +276,7 @@ func reviewOnce(c cfg, trusted map[string]string) error {
 		seen[key] = true
 		switch decision {
 		case "approve-once", "approve-permanently":
-			if err := approve(dev, decision == "approve-permanently"); err != nil {
+			if err := approve(c, dev, decision == "approve-permanently"); err != nil {
 				return err
 			}
 			fmt.Printf("%s: %s\n", approvalPrefix(decision), displayName(dev))
@@ -306,6 +309,7 @@ func watch(c cfg, trusted map[string]string) error {
 			continue
 		}
 		blacklist := loadPersistedRules(c.BlacklistPath)
+		allowedList := loadPersistedRules(c.AllowedPath)
 
 		active := map[string]bool{}
 		grouped := map[string]bool{}
@@ -334,8 +338,16 @@ func watch(c cfg, trusted map[string]string) error {
 				continue
 			}
 
+			if label, ok := blacklistLabelForRule(allowedList, "allow "+dev.Rule); ok {
+				if err := approve(c, dev, false); err == nil {
+					_ = writeMarker(marker, "allowed-permanently-transient")
+					notify("USBGuard", fmt.Sprintf("Auto-approved (persistent): %s", firstNonEmpty(label, displayName(dev))))
+					continue
+				}
+			}
+
 			if label, ok := trusted[dev.Rule]; ok {
-				if err := approve(dev, false); err == nil {
+				if err := approve(c, dev, false); err == nil {
 					_ = writeMarker(marker, "trusted-auto-allow")
 					notify("USBGuard", fmt.Sprintf("Auto-approved trusted device: %s", firstNonEmpty(label, displayName(dev))))
 					continue
@@ -384,7 +396,7 @@ func watch(c cfg, trusted map[string]string) error {
 						_ = writeMarker(groupMarker, decision)
 						switch decision {
 						case "approve-once", "approve-permanently":
-							if err := approve(item, decision == "approve-permanently"); err == nil {
+							if err := approve(c, item, decision == "approve-permanently"); err == nil {
 								notify("USBGuard", fmt.Sprintf("%s: %s", approvalPrefix(decision), displayName(item)))
 							}
 						case "deny-permanently":
@@ -407,7 +419,7 @@ func watch(c cfg, trusted map[string]string) error {
 				_ = writeMarker(marker, decision)
 				switch decision {
 				case "approve-once", "approve-permanently":
-					if err := approve(dev, decision == "approve-permanently"); err == nil {
+					if err := approve(c, dev, decision == "approve-permanently"); err == nil {
 						notify("USBGuard", fmt.Sprintf("%s: %s", approvalPrefix(decision), displayName(dev)))
 					}
 				case "deny-permanently":
@@ -508,7 +520,7 @@ func approveByID(c cfg, id string, permanent bool) error {
 	if err != nil {
 		return err
 	}
-	if err := approve(dev, permanent); err != nil {
+	if err := approve(c, dev, permanent); err != nil {
 		return err
 	}
 	marker := filepath.Join(c.StateDir, "seen", deviceKey(dev))
@@ -1281,11 +1293,12 @@ func rootPortToken(dev device) string {
 	return strings.SplitN(suffix, ".", 2)[0]
 }
 
-func approve(dev device, permanent bool) error {
+func approve(c cfg, dev device, permanent bool) error {
 	if permanent {
-		if _, err := run("usbguard", "append-rule", "allow "+dev.Rule); err != nil {
-			return err
-		}
+		// Save to local transient allowed list because NixOS rules are read-only
+		_ = savePersistedRule(c.AllowedPath, displayName(dev), "allow "+dev.Rule, riskLevel(dev))
+		// Attempt to append anyway (might work if daemon is configured for it)
+		_, _ = run("usbguard", "append-rule", "allow "+dev.Rule)
 	}
 	_, err := run("usbguard", "allow-device", dev.ID)
 	return err

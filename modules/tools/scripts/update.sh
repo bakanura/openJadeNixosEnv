@@ -10,11 +10,10 @@ export NIX_CONFIG=$'experimental-features = nix-command flakes\nwarn-dirty = fal
 
 # Detect GitHub CLI token to avoid 403 rate limit errors during flake updates
 if command -v gh >/dev/null 2>&1; then
-  GH_TOKEN=$(gh auth token 2>/dev/null || true)
+  GH_TOKEN=$(gh auth token 2>/dev/null || echo "${GITHUB_TOKEN:-}")
   if [ -n "$GH_TOKEN" ]; then
-    echo "[INFO] Using GitHub CLI token for authenticated flake updates."
-    export NIX_CONFIG="${NIX_CONFIG}
-access-tokens = github.com=${GH_TOKEN}"
+    echo "[INFO] Using GitHub authentication for flake updates."
+    export NIX_CONFIG="${NIX_CONFIG} access-tokens=github.com=${GH_TOKEN}"
   fi
 fi
 

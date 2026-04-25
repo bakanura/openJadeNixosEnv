@@ -370,7 +370,7 @@ in {
         else if config.drivers.nvidia.enable then "cuda"
         else null;
       # Force RDNA compatibility to prevent runner crashes
-      rocmOverrideGfx = lib.mkIf config.drivers.amdgpu.enable (lib.mkForce "10.3.0");
+      rocmOverrideGfx = lib.mkIf config.drivers.amdgpu.enable (lib.mkForce "11.0.0");
     };
 
     #printing = {
@@ -397,8 +397,15 @@ in {
   };
 
   # Force environment variable to resolve conflict with claw-ollama.nix module
-  systemd.services.ollama.environment.HSA_OVERRIDE_GFX_VERSION =
-    lib.mkIf config.drivers.amdgpu.enable (lib.mkForce "10.3.0");
+  systemd.services.ollama.environment = lib.mkIf config.drivers.amdgpu.enable {
+    HSA_OVERRIDE_GFX_VERSION = lib.mkForce "11.0.0";
+    HSA_ENABLE_SDMA = lib.mkForce "0";
+    OLLAMA_DEBUG = lib.mkForce "1";
+    # Force ROCm runner and help it find libraries
+    OLLAMA_LLM_LIBRARY = lib.mkForce "rocm";
+    LD_LIBRARY_PATH = lib.mkForce "${pkgs.rocmPackages.clr}/lib:${pkgs.rocmPackages.hip}/lib";
+    HIP_VISIBLE_DEVICES = lib.mkForce "0";
+  };
 
   systemd.services.flatpak-repo = {
     path = [pkgs.flatpak];
@@ -557,8 +564,9 @@ in {
 
   systemd.user.services.usbguard-reviewer = {
     description = "USBGuard Reviewer (Automatic Popups)";
-    wantedBy = ["graphical-session.target" "default.target"];
+    wantedBy = ["default.target"];
     partOf = ["graphical-session.target"];
+    path = with pkgs; [ usbguard libnotify bash systemd gawk gnugrep coreutils ];
     serviceConfig = {
       Type = "simple";
       # Poll the systemd environment and export variables once Hyprland is ready
@@ -618,8 +626,6 @@ in {
     logitech.wireless.enableGraphical = false;
   };
 
-  services.pulseaudio.enable = false; # stable branch
-
   # Bluetooth
   hardware = {
     bluetooth = {
@@ -655,6 +661,12 @@ in {
       })
     '';
   };
+
+  # Auto-unlock GNOME Keyring on login. 
+  # Note: Fingerprint login does not support auto-unlocking the keyring.
+  security.pam.services.login.enableGnomeKeyring = true;
+  security.pam.services.greetd.enableGnomeKeyring = true;
+
   security.pam.services.swaylock = {
     text = ''
       auth include login
@@ -691,6 +703,7 @@ in {
   # OpenGL
   hardware.graphics = {
     enable = true;
+    extraPackages = with pkgs; lib.optional config.drivers.amdgpu.enable rocmPackages.clr.icd;
   };
 
   console.keyMap = "de";

@@ -47,6 +47,7 @@ in {
       };
       shellAliases = {
         code = "${pkgs.vscode}/bin/code 2> >(grep -v -E \"^(Warning: '(ozone-platform-hint|enable-features|enable-wayland-ime|wayland-text-input-version)' is not in the list of known options, but still passed to Electron/Chromium\\.)$\" >&2)";
+        update = "export GITHUB_TOKEN=$(gh auth token 2>/dev/null || echo \"\"); update";
       };
       # Enable zsh plugins via NixOS module options
       autosuggestions.enable = true;
