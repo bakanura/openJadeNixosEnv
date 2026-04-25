@@ -205,7 +205,7 @@ func loadCfg() cfg {
 		DisableDockGrouping: envBool("USBGUARD_DISABLE_DOCK_GROUPING", false),
 		AutoPrompt:          envBool("USBGUARD_REVIEW_AUTO_PROMPT", true),
 		AutoBlockStorage:    envBool("USBGUARD_REVIEW_AUTO_BLOCK_STORAGE", true),
-		Popups:              envBool("USBGUARD_REVIEW_POPUPS", false),
+		Popups:              envBool("USBGUARD_REVIEW_POPUPS", true),
 		StateDir:            filepath.Join(stateHome, "usbguard-review"),
 		WhitelistPath:       strings.TrimSpace(os.Getenv("USBGUARD_WHITELIST_JSON")),
 		BlacklistPath:       firstNonEmpty(strings.TrimSpace(os.Getenv("USBGUARD_PERSISTENT_BLACKLIST_JSON")), filepath.Join(stateHome, "usbguard-review", "blacklist.json")),
@@ -1283,13 +1283,7 @@ func rootPortToken(dev device) string {
 
 func approve(dev device, permanent bool) error {
 	if permanent {
-		allowRule := dev.Rule
-		fields := strings.Fields(allowRule)
-		if len(fields) > 0 {
-			fields[0] = "allow"
-			allowRule = strings.Join(fields, " ")
-		}
-		if _, err := run("usbguard", "append-rule", allowRule); err != nil {
+		if _, err := run("usbguard", "append-rule", "allow "+dev.Rule); err != nil {
 			return err
 		}
 	}
@@ -1303,13 +1297,7 @@ func blockDevice(dev device) error {
 }
 
 func blockRuleFor(dev device) string {
-	blockRule := dev.Rule
-	fields := strings.Fields(blockRule)
-	if len(fields) > 0 {
-		fields[0] = "block"
-		blockRule = strings.Join(fields, " ")
-	}
-	return blockRule
+	return "block " + dev.Rule
 }
 
 func persistBlock(c cfg, dev device, blacklist persistedRules) error {
