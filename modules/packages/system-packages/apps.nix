@@ -143,6 +143,7 @@ in {
     unzip
     vkd3d
     wallust
+    
     wdisplays
     wl-clipboard
     wlr-randr
@@ -163,5 +164,7 @@ in {
     yt-dlp
     dxvk
     gamemode
+    keepassxc
+    rpi-imager
   ];
 }
