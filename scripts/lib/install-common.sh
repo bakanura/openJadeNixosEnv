@@ -456,8 +456,10 @@ nhl_insert_option_before_closing_brace() {
   # Args: $1 = file, $2 = full option line (including trailing ;)
   local file="$1"
   local line="$2"
-  if [ -f "$file" ] && tail -n 1 "$file" | grep -q '^[[:space:]]*}[[:space:]]*$'; then
-    sed -i '$i\  '"$line" "$file" || true
+  local last_brace_line
+  last_brace_line=$(grep -n '^[[:space:]]*}[[:space:]]*$' "$file" | tail -n 1 | cut -d: -f1)
+  if [ -n "$last_brace_line" ]; then
+    sed -i "${last_brace_line}i\  ${line}" "$file"
   else
     printf '\n  %s\n' "$line" >> "$file"
   fi
@@ -570,8 +572,7 @@ nhl_prompt_timezone_console() {
   if grep -q 'console\.keyMap' "$cfg"; then
     sed -i "s|console\.keyMap = \".*\";|console.keyMap = \"$consoleKeyMap\";|" "$cfg" || true
   else
-    # Fallback: append a console.keyMap line near the end
-    printf '\n  console.keyMap = "%s";\n' "$consoleKeyMap" >> "$cfg"
+    nhl_insert_option_before_closing_brace "$cfg" "console.keyMap = \"$consoleKeyMap\";"
   fi
 
   export NHL_SELECTED_TIMEZONE="$timeZone"
@@ -630,7 +631,7 @@ nhl_prompt_fingerprint() {
     if grep -q 'local\.security\.fingerprint\.enable' "$cfg"; then
       sed -i 's/local\.security\.fingerprint\.enable = [^;]*;/local.security.fingerprint.enable = true;/' "$cfg" || true
     else
-      printf '\n  local.security.fingerprint.enable = true;\n' >> "$cfg"
+      nhl_insert_option_before_closing_brace "$cfg" "local.security.fingerprint.enable = true;"
     fi
     export NHL_ENABLE_FINGERPRINT=1
     echo "${OK} Fingerprint login enabled in host config."
@@ -638,7 +639,7 @@ nhl_prompt_fingerprint() {
     if grep -q 'local\.security\.fingerprint\.enable' "$cfg"; then
       sed -i 's/local\.security\.fingerprint\.enable = [^;]*;/local.security.fingerprint.enable = false;/' "$cfg" || true
     else
-      printf '\n  local.security.fingerprint.enable = false;\n' >> "$cfg"
+      nhl_insert_option_before_closing_brace "$cfg" "local.security.fingerprint.enable = false;"
     fi
     export NHL_ENABLE_FINGERPRINT=0
     echo "${NOTE} Fingerprint login left disabled."
@@ -665,7 +666,7 @@ nhl_prompt_vscode_confirm_sync() {
     if grep -q 'vscodeGitConfirmSync' "$vars"; then
       sed -i 's/vscodeGitConfirmSync = [^;]*;/vscodeGitConfirmSync = false;/' "$vars" || true
     else
-      printf '\n  vscodeGitConfirmSync = false; # false skips the VS Code sync confirmation prompt.\n' >> "$vars"
+      nhl_insert_option_before_closing_brace "$vars" "vscodeGitConfirmSync = false; # false skips the VS Code sync confirmation prompt."
     fi
     export NHL_VSCODE_CONFIRM_SYNC=false
     echo "${OK} VS Code sync confirmation disabled."
@@ -673,7 +674,7 @@ nhl_prompt_vscode_confirm_sync() {
     if grep -q 'vscodeGitConfirmSync' "$vars"; then
       sed -i 's/vscodeGitConfirmSync = [^;]*;/vscodeGitConfirmSync = true;/' "$vars" || true
     else
-      printf '\n  vscodeGitConfirmSync = true; # true keeps the VS Code sync confirmation prompt.\n' >> "$vars"
+      nhl_insert_option_before_closing_brace "$vars" "vscodeGitConfirmSync = true; # true keeps the VS Code sync confirmation prompt."
     fi
     export NHL_VSCODE_CONFIRM_SYNC=true
     echo "${NOTE} VS Code sync confirmation kept enabled."

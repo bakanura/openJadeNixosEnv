@@ -143,7 +143,6 @@ in {
     unzip
     vkd3d
     wallust
-    
     wdisplays
     wl-clipboard
     wlr-randr
@@ -166,5 +165,6 @@ in {
     gamemode
     keepassxc
     rpi-imager
+    protonmail-desktop
   ];
 }
