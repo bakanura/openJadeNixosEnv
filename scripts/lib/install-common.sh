@@ -94,11 +94,16 @@ nhl_yes_no() {
 }
 
 nhl_resolve_install_username() {
-  # In managed/non-interactive runs, use a bootstrap account.
+  # Prefer the current shell user. Only fallback if strictly required in automated environments.
+  if [ -n "${USER:-}" ] && [ "$USER" != "root" ]; then
+    printf "%s\n" "$USER"
+    return 0
+  fi
+  
   if nhl_is_noninteractive; then
     printf "risiq-bootstrap\n"
   else
-    printf "%s\n" "${USER}"
+    printf "%s\n" "$(id -un 2>/dev/null || echo "roederp")"
   fi
 }
 

@@ -166,5 +166,6 @@ in {
     keepassxc
     rpi-imager
     protonmail-desktop
+    libreoffice
   ];
 }

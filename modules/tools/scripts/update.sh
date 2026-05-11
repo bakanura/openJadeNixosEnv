@@ -5,7 +5,43 @@
 # HELP_EXAMPLE=update -r --full-summary
 set -euo pipefail
 
-cd "__REPO_ROOT__"
+# Determine repository root.
+resolve_repo_root() {
+  # 1. Check if current directory is the repo root
+  [[ -f "flake.nix" && -d "hosts" ]] && return 0
+
+  # 2. Try to find the repo relative to this script's physical location
+  local rel_path
+  rel_path="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
+  [[ -f "$rel_path/flake.nix" ]] && cd "$rel_path" && return 0
+
+  # 3. Try the current home directory fallback
+  [[ -d "$HOME/NixOS-Hyprland" ]] && cd "$HOME/NixOS-Hyprland" && return 0
+
+  # 4. Final fallback to the path baked-in at build time
+  cd "__REPO_ROOT__" 2>/dev/null || { echo "[ERROR] Repository root not found."; exit 1; }
+}
+
+resolve_repo_root
+
+# Guard against accidental identity drift to bootstrap account.
+check_user_identity() {
+  local id_file="./hosts/$runtime_host/identity.json"
+  if [ -f "$id_file" ]; then
+    local id_user
+    id_user=$(grep -oP '"username":\s*"\K[^"]+' "$id_file" || echo "")
+    if [ "$id_user" = "risiq-bootstrap" ]; then
+      echo "[WARN] Target identity for $runtime_host is 'risiq-bootstrap'."
+      echo "[WARN] This will break your session if your real user is 'roederp'."
+      read -r -p "Confirm identity override? (y/N): " choice </dev/tty || true
+      if [[ ! "$choice" =~ ^[Yy]$ ]]; then
+        echo "[ERROR] Aborting rebuild to prevent user database corruption."
+        exit 1
+      fi
+    fi
+  fi
+}
+
 export NIX_CONFIG=$'experimental-features = nix-command flakes\nwarn-dirty = false'
 
 # Detect GitHub CLI token to avoid 403 rate limit errors during flake updates
@@ -175,7 +211,7 @@ ensure_sudo_session() {
     exit 1
   fi
 
-  echo "[INFO] Authenticating for privileged operations..."
+  echo "[INFO] Authenticating for privileged operations on $runtime_host..."
   sudo -v
 
   (
@@ -221,7 +257,7 @@ if [ "$run_rebuild" -eq 0 ]; then
   exit 0
 fi
 
-echo "[INFO] Starting rebuild for host: $runtime_host"
+check_user_identity
 
 ensure_sudo_session
 
