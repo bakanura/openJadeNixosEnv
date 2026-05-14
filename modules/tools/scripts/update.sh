@@ -30,11 +30,24 @@ check_user_identity() {
   if [ -f "$id_file" ]; then
     local id_user
     id_user=$(grep -oP '"username":\s*"\K[^"]+' "$id_file" || echo "")
-    if [ "$id_user" = "risiq-bootstrap" ]; then
-      echo "[WARN] Target identity for $runtime_host is 'risiq-bootstrap'."
-      echo "[WARN] This will break your session if your real user is 'roederp'."
-      read -r -p "Confirm identity override? (y/N): " choice </dev/tty || true
-      if [[ ! "$choice" =~ ^[Yy]$ ]]; then
+    
+    # Detect "ghost" user state (UID exists in session but not in /etc/passwd)
+    if ! id -un >/dev/null 2>&1; then
+      echo "[ERROR] Your current user ('$USER') no longer exists in the system database."
+      echo "[ERROR] This is a 'ghost' session caused by a rebuild that deleted your account."
+      echo "[ERROR] ACTION REQUIRED: Reboot and select a previous generation in the boot menu."
+      exit 1
+    fi
+
+    local current_user="${SUDO_USER:-${USER:-$(id -un)}}"
+    if [ "$id_user" = "risiq-bootstrap" ] && [ "$current_user" != "risiq-bootstrap" ] && [ "$current_user" != "root" ]; then
+      echo "[WARN] Target identity for $runtime_host is 'risiq-bootstrap', but you are logged in as '$current_user'."
+      echo "[WARN] This will DELETE your current user and replace it with a bootstrap account."
+      read -r -p "Fix identity file to use '$current_user' instead? (Y/n): " choice </dev/tty || true
+      if [[ -z "$choice" || "$choice" =~ ^[Yy]$ ]]; then
+        sed -i "s/\"username\":\s*\"risiq-bootstrap\"/\"username\": \"$current_user\"/" "$id_file"
+        echo "[INFO] Identity file updated to '$current_user'. Proceeding with rebuild."
+      else
         echo "[ERROR] Aborting rebuild to prevent user database corruption."
         exit 1
       fi

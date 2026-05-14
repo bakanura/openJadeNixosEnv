@@ -31,6 +31,16 @@ nhl_patch_flake_identity() {
   local installUsername="$3"
   local identityFile="${repoRoot}/hosts/${hostName}/identity.json"
 
+  # Safety check: do not overwrite a real user with the bootstrap fallback if the file already exists.
+  if [ "$installUsername" = "risiq-bootstrap" ] && [ -f "$identityFile" ]; then
+    local existing
+    existing=$(grep -oP '"username":\s*"\K[^"]+' "$identityFile" || echo "")
+    if [ -n "$existing" ] && [ "$existing" != "risiq-bootstrap" ]; then
+      echo "[WARN] Refusing to overwrite existing user '$existing' with 'risiq-bootstrap' in identity file."
+      return 0
+    fi
+  fi
+
   mkdir -p "$(dirname "$identityFile")"
   cat >"$identityFile" <<EOF
 {
@@ -94,17 +104,40 @@ nhl_yes_no() {
 }
 
 nhl_resolve_install_username() {
-  # Prefer the current shell user. Only fallback if strictly required in automated environments.
+  # 1. Check SUDO_USER (most reliable when running via sudo)
+  if [ -n "${SUDO_USER:-}" ] && [ "$SUDO_USER" != "root" ]; then
+    if id "$SUDO_USER" >/dev/null 2>&1; then
+      printf "%s\n" "$SUDO_USER"
+      return 0
+    fi
+  fi
+
+  # 2. Check current USER
   if [ -n "${USER:-}" ] && [ "$USER" != "root" ]; then
-    printf "%s\n" "$USER"
+    if id "$USER" >/dev/null 2>&1; then
+      printf "%s\n" "$USER"
+      return 0
+    fi
+  fi
+
+  # 3. Last ditch check of current effective ID
+  local current_id_name
+  current_id_name=$(id -un 2>/dev/null || true)
+  if [ -n "$current_id_name" ] && [ "$current_id_name" != "root" ]; then
+    printf "%s\n" "$current_id_name"
     return 0
   fi
-  
+
+  # 3. Fallback for non-interactive automation
   if nhl_is_noninteractive; then
     printf "risiq-bootstrap\n"
-  else
-    printf "%s\n" "$(id -un 2>/dev/null || echo "roederp")"
+    return 0
   fi
+
+  # 4. Interactive fallback: Use the first UID 1000 user found (skipping root)
+  local real_user
+  real_user=$(awk -F: '$3 == 1000 {print $1}' /etc/passwd | head -n1)
+  printf "%s\n" "${real_user:-roederp}"
 }
 
 nhl_detect_host_serial() {

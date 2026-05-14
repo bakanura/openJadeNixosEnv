@@ -133,13 +133,20 @@
         # If bootstrap account still exists and we're now logged in as the real user,
         # remove it automatically after successful handoff.
         if [ "$current_user" != "risiq-bootstrap" ] && id risiq-bootstrap >/dev/null 2>&1; then
-          echo
-          echo "Cleaning up bootstrap account 'risiq-bootstrap'..."
-          if sudo userdel -r risiq-bootstrap; then
-            echo "Bootstrap account removed."
+          echo -e "\n[INFO] Finalizing setup: cleaning up bootstrap account 'risiq-bootstrap'..."
+
+          # Forcefully terminate any lingering bootstrap processes or systemd units to allow deletion
+          bootstrap_uid=$(id -u risiq-bootstrap 2>/dev/null || true)
+          if [ -n "$bootstrap_uid" ]; then
+            sudo systemctl stop "user@$bootstrap_uid.service" 2>/dev/null || true
+          fi
+          sudo pkill -handle cases where the user is 'logged in' or has active processes
+          echo "[INFO] Requesting administrative access to delete bootstrap user..."
+          # Wait a moment for processes to terminate
+          if sudo userdel --force --remove risiq-bootstrap; thenme directory have been removed."
           else
-            echo "Could not remove bootstrap account automatically."
-            echo "Run manually when ready: sudo userdel -r risiq-bootstrap"
+            echo "[WARN] Automatic removal of 'risiq-bootstrap' failed (exit code $?)."
+            echo "[WARN] You can try manually: sudo userdel -rf risiq-bootstrap"
           fi
         fi
 
