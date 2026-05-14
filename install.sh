@@ -85,11 +85,11 @@ sleep 1
 echo "-----"
 
 if type nhl_prompt_hostname >/dev/null 2>&1; then
-    hostName=$(nhl_prompt_hostname "RISIQ")
+    hostName=$(nhl_prompt_hostname "NixOS")
 elif type nhl_derive_hostname >/dev/null 2>&1; then
-    hostName=$(nhl_derive_hostname "RISIQ")
+    hostName=$(nhl_derive_hostname "NixOS")
 else
-    hostName="RISIQ-UNKNOWN"
+    hostName="UNKNOWN-HOST"
 fi
 echo "$NOTE Selected hostname: $hostName"
 
@@ -169,14 +169,14 @@ max_attempts=3
 hardware_file="./hosts/$hostName/hardware.nix"
 
 while [ $attempts -lt $max_attempts ]; do
-    if [ $is_enrolled -eq 1 ] && [ -f "$hardware_file" ]; then
+    if [ $is_enrolled -eq 1 ] && [ -s "$hardware_file" ]; then
         echo "${NOTE} Existing hardware configuration found for enrolled device; keeping current file."
         break
     fi
 
-    sudo nixos-generate-config --show-hardware-config >"$hardware_file" 2>/dev/null
+    sudo nixos-generate-config --show-hardware-config >"$hardware_file" 2>/dev/null || rm -f "$hardware_file"
 
-    if [ -f "$hardware_file" ]; then
+    if [ -s "$hardware_file" ]; then
         echo "${OK} Hardware configuration successfully generated."
         break
     else
@@ -213,7 +213,7 @@ if type nhl_save_installer_state >/dev/null 2>&1; then
         "${NHL_GPU_PROFILE:-}" \
         "${NHL_VSCODE_CONFIRM_SYNC:-true}" \
         "${NHL_SELECTED_HOSTNAME_MODE:-prefix-serial}" \
-        "${NHL_SELECTED_HOSTNAME_PREFIX:-RISIQ}" \
+        "${NHL_SELECTED_HOSTNAME_PREFIX:-NixOS}" \
         "${hostName}"
 fi
 

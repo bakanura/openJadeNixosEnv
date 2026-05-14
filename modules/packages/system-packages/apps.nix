@@ -102,6 +102,7 @@ in {
     glib
     gsettings-qt
     git
+    nextcloud-client
     firefox
     gnome-system-monitor
     fastfetch

@@ -12,7 +12,7 @@
         fi
 
         echo "==============================================="
-        echo "        RISIQ Device First Login / Erstanmeldung"
+        echo "        NixOS Device First Login / Erstanmeldung"
         echo "==============================================="
 
         rendered_logo=0
@@ -28,19 +28,19 @@
 
         if [ "$rendered_logo" -ne 1 ]; then
           cat <<'EOF'
-              ____  _____ ____  ____   ___
-             |  _ \|_   _/ ___||  _ \ |_ _|
-             | |_) | | | \___ \| |_) | | |
-             |  _ <  | |  ___) |  _ <  | |
-             |_| \_\ |_| |____/|_| \_\|___|
-    EOF
+          _   _ _      ___  ____  
+         | \ | (_)_  _/ _ \/ ___| 
+         |  \| | \ \/ / | | \___ \ 
+         | |\  | |>  <| |_| |___) |
+         |_| \_|_/_/\_\\___/|____/ 
+EOF
         fi
         echo "Logo (SVG): ${logoUrl}"
         echo "Support / Support-Hotline: 00496214909053-3"
         echo
 
-        echo "Welcome to RISIQ."
-        echo "Willkommen bei RISIQ."
+        echo "Welcome to NixOS."
+        echo "Willkommen bei NixOS."
         echo "This one-time setup secures your account."
         echo "Diese einmalige Einrichtung sichert Ihr Benutzerkonto."
         echo
@@ -48,7 +48,7 @@
         echo "2) Enroll your fingerprint / Fingerabdruck einrichten (required / erforderlich)"
         echo
 
-        if [ "$current_user" = "risiq-bootstrap" ]; then
+        if [ "$current_user" = "nixos-bootstrap" ]; then
           echo "Bootstrap mode detected."
           echo "Einrichtungsmodus erkannt."
           echo
@@ -85,7 +85,7 @@
     {
       "username": "$target_user"
     }
-    EOF
+EOF
           fi
 
           echo
@@ -93,7 +93,7 @@
           echo "Sie können sich jetzt abmelden und als '$target_user' anmelden."
           echo
           echo "Optional cleanup command (run after new user login):"
-          echo "  sudo userdel -r risiq-bootstrap"
+          echo "  sudo userdel -r nixos-bootstrap"
           read -r -p "Press Enter to close / Enter zum Schließen..."
           touch "$marker"
           exit 0
@@ -130,30 +130,31 @@
           exit 1
         fi
 
-        # If bootstrap account still exists and we're now logged in as the real user,
+        # If bootstrap account still exists and we are now logged in as the real user,
         # remove it automatically after successful handoff.
-        if [ "$current_user" != "risiq-bootstrap" ] && id risiq-bootstrap >/dev/null 2>&1; then
-          echo -e "\n[INFO] Finalizing setup: cleaning up bootstrap account 'risiq-bootstrap'..."
+        if [ "$current_user" != "nixos-bootstrap" ] && id nixos-bootstrap >/dev/null 2>&1; then
+          echo -e "\n[INFO] Finalizing setup: cleaning up bootstrap account 'nixos-bootstrap'..."
 
-          # Forcefully terminate any lingering bootstrap processes or systemd units to allow deletion
-          bootstrap_uid=$(id -u risiq-bootstrap 2>/dev/null || true)
+          # Forcefully terminate any lingering bootstrap processes or systemd units to allow deletion.
+          bootstrap_uid=$(id -u nixos-bootstrap 2>/dev/null || true)
           if [ -n "$bootstrap_uid" ]; then
             sudo systemctl stop "user@$bootstrap_uid.service" 2>/dev/null || true
           fi
-          sudo pkill -handle cases where the user is 'logged in' or has active processes
+          sudo pkill -u nixos-bootstrap || true
           echo "[INFO] Requesting administrative access to delete bootstrap user..."
           # Wait a moment for processes to terminate
-          if sudo userdel --force --remove risiq-bootstrap; thenme directory have been removed."
+          if sudo userdel --force --remove nixos-bootstrap; then
+            echo "[INFO] Bootstrap account and home directory have been removed."
           else
-            echo "[WARN] Automatic removal of 'risiq-bootstrap' failed (exit code $?)."
-            echo "[WARN] You can try manually: sudo userdel -rf risiq-bootstrap"
+            echo "[WARN] Automatic removal of 'nixos-bootstrap' failed (exit code $?)."
+            echo "[WARN] You can try manually: sudo userdel -rf nixos-bootstrap"
           fi
         fi
 
         touch "$marker"
         echo
-        echo "RISIQ first-login setup complete."
-        echo "RISIQ-Erstanmeldung abgeschlossen."
+        echo "NixOS first-login setup complete."
+        echo "NixOS-Erstanmeldung abgeschlossen."
         read -r -p "Press Enter to close / Enter zum Schließen..."
   '';
 
@@ -178,18 +179,18 @@
     fi
 
     if command -v kitty >/dev/null 2>&1; then
-      kitty --title "RISIQ First Login Setup" -e "${setupFlow}"
+      kitty --title "NixOS First Login Setup" -e "${setupFlow}"
       exit 0
     fi
 
     if command -v notify-send >/dev/null 2>&1; then
-      notify-send "RISIQ First Login Setup" "Run: ${setupFlow}"
+      notify-send "NixOS First Login Setup" "Run: ${setupFlow}"
     fi
   '';
 in {
   systemd.user.services.nhl-first-login-setup = {
     Unit = {
-      Description = "RISIQ one-time first-login account setup";
+      Description = "NixOS one-time first-login account setup";
       After = ["graphical-session.target"];
       Wants = ["graphical-session.target"];
     };

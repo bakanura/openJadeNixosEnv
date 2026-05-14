@@ -332,8 +332,8 @@ in {
       enable = true;
       extraRules = ''
         ACTION=="add|change", SUBSYSTEM=="usb", ATTR{idVendor}=="0bda", ATTR{idProduct}=="8153", TEST=="power/control", ATTR{power/control}="on"
-        ACTION=="change", SUBSYSTEM=="power_supply", KERNEL=="AC*", TAG+="systemd", ENV{SYSTEMD_WANTS}+="risiq-acoustic-power-policy.service"
-        ACTION=="change", SUBSYSTEM=="power_supply", KERNEL=="ADP*", TAG+="systemd", ENV{SYSTEMD_WANTS}+="risiq-acoustic-power-policy.service"
+        ACTION=="change", SUBSYSTEM=="power_supply", KERNEL=="AC*", TAG+="systemd", ENV{SYSTEMD_WANTS}+="acoustic-power-policy.service"
+        ACTION=="change", SUBSYSTEM=="power_supply", KERNEL=="ADP*", TAG+="systemd", ENV{SYSTEMD_WANTS}+="acoustic-power-policy.service"
       '';
     };
     envfs.enable = true;
@@ -414,7 +414,7 @@ in {
     '';
   };
 
-  systemd.services.risiq-acoustic-power-policy = {
+  systemd.services.acoustic-power-policy = {
     description = "Apply quieter CPU/power policy, especially on AC";
     after = ["power-profiles-daemon.service"];
     wantedBy = ["multi-user.target"];
@@ -460,16 +460,16 @@ in {
     '';
   };
 
-  systemd.services.risiq-adaptive-cpu-boost = {
+  systemd.services.adaptive-cpu-boost = {
     description = "Adaptive CPU boost controller (AC-only, battery-priority)";
-    after = ["risiq-acoustic-power-policy.service"];
+    after = ["acoustic-power-policy.service"];
     serviceConfig = {
       Type = "oneshot";
     };
     script = ''
       set -eu
 
-      state_file="/run/risiq-adaptive-boost.state"
+      state_file="/run/adaptive-boost.state"
       last_state="off"
       if [ -r "$state_file" ]; then
         last_state="$(cat "$state_file" 2>/dev/null || true)"
@@ -585,12 +585,12 @@ in {
     };
   };
 
-  systemd.timers.risiq-adaptive-cpu-boost = {
+  systemd.timers.adaptive-cpu-boost = {
     wantedBy = ["timers.target"];
     timerConfig = {
       OnBootSec = "20s";
       OnUnitActiveSec = "8s";
-      Unit = "risiq-adaptive-cpu-boost.service";
+      Unit = "adaptive-cpu-boost.service";
     };
   };
 

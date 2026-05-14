@@ -40,12 +40,12 @@ check_user_identity() {
     fi
 
     local current_user="${SUDO_USER:-${USER:-$(id -un)}}"
-    if [ "$id_user" = "risiq-bootstrap" ] && [ "$current_user" != "risiq-bootstrap" ] && [ "$current_user" != "root" ]; then
-      echo "[WARN] Target identity for $runtime_host is 'risiq-bootstrap', but you are logged in as '$current_user'."
+    if [ "$id_user" = "nixos-bootstrap" ] && [ "$current_user" != "nixos-bootstrap" ] && [ "$current_user" != "root" ]; then
+      echo "[WARN] Target identity for $runtime_host is 'nixos-bootstrap', but you are logged in as '$current_user'."
       echo "[WARN] This will DELETE your current user and replace it with a bootstrap account."
       read -r -p "Fix identity file to use '$current_user' instead? (Y/n): " choice </dev/tty || true
       if [[ -z "$choice" || "$choice" =~ ^[Yy]$ ]]; then
-        sed -i "s/\"username\":\s*\"risiq-bootstrap\"/\"username\": \"$current_user\"/" "$id_file"
+        sed -i "s/\"username\":\s*\"nixos-bootstrap\"/\"username\": \"$current_user\"/" "$id_file"
         echo "[INFO] Identity file updated to '$current_user'. Proceeding with rebuild."
       else
         echo "[ERROR] Aborting rebuild to prevent user database corruption."

@@ -32,11 +32,11 @@ nhl_patch_flake_identity() {
   local identityFile="${repoRoot}/hosts/${hostName}/identity.json"
 
   # Safety check: do not overwrite a real user with the bootstrap fallback if the file already exists.
-  if [ "$installUsername" = "risiq-bootstrap" ] && [ -f "$identityFile" ]; then
+  if [ "$installUsername" = "nixos-bootstrap" ] && [ -f "$identityFile" ]; then
     local existing
     existing=$(grep -oP '"username":\s*"\K[^"]+' "$identityFile" || echo "")
-    if [ -n "$existing" ] && [ "$existing" != "risiq-bootstrap" ]; then
-      echo "[WARN] Refusing to overwrite existing user '$existing' with 'risiq-bootstrap' in identity file."
+    if [ -n "$existing" ] && [ "$existing" != "nixos-bootstrap" ]; then
+      echo "[WARN] Refusing to overwrite existing user '$existing' with 'nixos-bootstrap' in identity file."
       return 0
     fi
   fi
@@ -130,7 +130,7 @@ nhl_resolve_install_username() {
 
   # 3. Fallback for non-interactive automation
   if nhl_is_noninteractive; then
-    printf "risiq-bootstrap\n"
+    printf "nixos-bootstrap\n"
     return 0
   fi
 
@@ -166,14 +166,14 @@ nhl_sanitize_hostname() {
   sanitized=$(printf "%s" "$sanitized" | sed 's/--*/-/g; s/^-//; s/-$//')
   sanitized="${sanitized:0:63}"
   if [ -z "$sanitized" ]; then
-    sanitized="RISIQ-UNKNOWN"
+    sanitized="UNKNOWN-HOST"
   fi
   printf "%s\n" "$sanitized"
 }
 
 nhl_derive_hostname() {
-  # Args: $1 = optional prefix (default: RISIQ)
-  local prefix="${1:-RISIQ}"
+  # Args: $1 = optional prefix (default: NixOS)
+  local prefix="${1:-NixOS}"
   local serial=""
   local serial_clean=""
   local hostName=""
@@ -193,7 +193,7 @@ nhl_derive_hostname() {
 }
 
 nhl_prompt_hostname() {
-  local default_prefix="${1:-RISIQ}"
+  local default_prefix="${1:-NixOS}"
   local serial=""
   local serial_clean=""
   local mode=""
@@ -219,7 +219,7 @@ nhl_prompt_hostname() {
     if printf "%s" "$mode" | grep -qi '^[uUcC]'; then
       custom=$(nhl_read_input "Enter the exact hostname to use (no serial will be appended): " "${NHL_STATE_HOSTNAME_VALUE:-}")
       custom=$(nhl_sanitize_hostname "$custom")
-      if [ -z "$custom" ] || [ "$custom" = "RISIQ-UNKNOWN" ]; then
+      if [ -z "$custom" ] || [ "$custom" = "UNKNOWN-HOST" ]; then
         echo "[WARN] Please enter a non-empty hostname."
         continue
       fi
@@ -237,7 +237,7 @@ nhl_prompt_hostname() {
   while true; do
     prefix=$(nhl_read_input "Enter the hostname syntax/prefix to combine with this device serial (${serial_clean}): " "${NHL_STATE_HOSTNAME_PREFIX:-$default_prefix}")
     prefix=$(nhl_sanitize_hostname "$prefix")
-    if [ -n "$prefix" ] && [ "$prefix" != "RISIQ-UNKNOWN" ]; then
+    if [ -n "$prefix" ] && [ "$prefix" != "UNKNOWN-HOST" ]; then
       break
     fi
     echo "[WARN] Please enter a non-empty hostname syntax/prefix."
@@ -379,7 +379,7 @@ nhl_save_installer_state() {
   local gpuProfile="$6"
   local vscodeConfirmSync="${7:-true}"
   local hostnameMode="${8:-prefix-serial}"
-  local hostnamePrefix="${9:-RISIQ}"
+  local hostnamePrefix="${9:-NixOS}"
   local hostnameValue="${10:-$hostName}"
   local stateFile
   local fpJson="false"
@@ -885,8 +885,9 @@ nhl_prompt_luks_tpm_setup() {
   unset NHL_LUKS_DEVICE NHL_LUKS_NAME NHL_RECOVERY_KEY NHL_RECOVERY_KEY_SHA256 NHL_RECOVERY_KEY_SHA512 NHL_LUKS_CURRENT_PASSPHRASE
 
   if nhl_is_noninteractive; then
-    echo "${ERROR} Non-interactive mode detected. Mandatory LUKS+TPM enrollment requires interactive confirmation."
-    return 1
+    echo "${WARN} Non-interactive mode detected. Skipping mandatory LUKS+TPM enrollment."
+    echo "${NOTE} You will need to enroll your TPM and recovery keys manually after installation."
+    return 0
   fi
 
   luksDevice=$(nhl_extract_luks_device_from_hardware "$hostName" || true)
