@@ -26,7 +26,7 @@ in {
         "render"
         "usbguard"
         "audio"
-        "docker"
+        "docker_29"
       ];
 
       # define user packages here

@@ -168,5 +168,6 @@ in {
     rpi-imager
     protonmail-desktop
     libreoffice
+    waydroid
   ];
 }
