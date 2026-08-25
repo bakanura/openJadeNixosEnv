@@ -732,8 +732,8 @@ nhl_ensure_required_packages() {
     fi
   fi
 
-  if [ "${#missing[@]}" -eq 0 ] && \
-     [ "$fwupd_configured" = true ] && \
+  if [ "${#missing[@]}" -eq 0 ] &&
+     [ "$fwupd_configured" = true ] &&
      [ "$fwupd_needs_service" = false ]; then
     echo "[OK] All required packages and services are available."
     return 0
@@ -780,8 +780,11 @@ nhl_ensure_required_packages() {
 
   echo "[ACTION] Updating $config..."
 
-  # Ensure environment.systemPackages exists when packages are missing.
+  # ------------------------------------------------------------
+  # Add missing packages to environment.systemPackages.
+  # ------------------------------------------------------------
   if [ "${#missing[@]}" -gt 0 ]; then
+
     if ! grep -q 'environment\.systemPackages' "$config"; then
       cat <<'EOF' | sudo tee -a "$config" >/dev/null
 
@@ -791,8 +794,6 @@ EOF
     fi
 
     for pkg in "${missing[@]}"; do
-      # Match package names as individual Nix list entries rather than
-      # accidentally matching substrings elsewhere in the file.
       if ! grep -qE "^[[:space:]]*${pkg}[[:space:]]*$" "$config"; then
         sudo sed -i \
           "/environment\.systemPackages = with pkgs; \[/a\\    ${pkg}" \
@@ -805,7 +806,9 @@ EOF
     done
   fi
 
-  # fwupd needs both the package and the NixOS service.
+  # ------------------------------------------------------------
+  # Enable fwupd INSIDE the Nix configuration attribute set.
+  # ------------------------------------------------------------
   if [ "$fwupd_configured" = false ]; then
     echo "[ACTION] Enabling fwupd service..."
 
@@ -814,8 +817,11 @@ EOF
         's/services\.fwupd\.enable[[:space:]]*=[[:space:]]*[^;]*;/services.fwupd.enable = true;/' \
         "$config"
     else
-      printf '\nservices.fwupd.enable = true;\n' | \
-        sudo tee -a "$config" >/dev/null
+      # Use the shared helper so the option is inserted BEFORE
+      # the final closing } instead of being appended after it.
+      nhl_insert_option_before_closing_brace \
+        "$config" \
+        "services.fwupd.enable = true;"
     fi
 
     echo "[OK] Added services.fwupd.enable = true."
@@ -831,7 +837,9 @@ EOF
 
   echo "[OK] NixOS rebuild completed."
 
-  # Verify every command again after the rebuild.
+  # ------------------------------------------------------------
+  # Verify commands after rebuild.
+  # ------------------------------------------------------------
   for cmd in "${!packages[@]}"; do
     if ! command -v "$cmd" >/dev/null 2>&1; then
       echo "[ERROR] $cmd is still unavailable after the rebuild."
@@ -839,15 +847,19 @@ EOF
     fi
   done
 
-  # Verify the actual fwupd daemon.
+  # ------------------------------------------------------------
+  # Verify fwupd daemon after rebuild.
+  # ------------------------------------------------------------
   if ! systemctl is-active --quiet fwupd.service 2>/dev/null; then
     echo "[ERROR] fwupd.service is still not running after the rebuild."
     echo "[ERROR] fwupdmgr cannot communicate with the fwupd daemon."
     return 1
   fi
 
+  echo "[OK] fwupd daemon is running."
   echo "[OK] All required packages and services are installed and available."
 }
+
 
 nhl_prompt_fingerprint() {
   # Args: $1 = hostName
