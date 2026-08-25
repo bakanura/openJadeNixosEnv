@@ -36,3 +36,4 @@ __pycache__/
 hosts/*
 !hosts/default/
 !hosts/default/**
+.local-host/
