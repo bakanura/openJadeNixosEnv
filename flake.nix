@@ -134,6 +134,44 @@
     };
 
     # -----------------------------------------------------------------------
+    # Host variables
+    #
+    # Machine-specific variables are loaded from:
+    #
+    #   .local-host/<hostname>/variables.nix
+    #
+    # This is intentionally NOT:
+    #
+    #   hosts/<hostname>/variables.nix
+    #
+    # The resulting attribute set is passed to both NixOS and Home Manager
+    # through specialArgs / extraSpecialArgs.
+    #
+    # Home Manager modules should consume:
+    #
+    #   hostVars
+    #
+    # instead of importing hosts/${host}/variables.nix themselves.
+    # -----------------------------------------------------------------------
+    hostVariables = host: let
+      hostDir = localHostRoot + "/${host}";
+      variablesPath = hostDir + "/variables.nix";
+    in
+      if builtins.pathExists variablesPath
+      then import variablesPath
+      else throw ''
+        Host '${host}' is missing variables.nix.
+
+        Expected:
+
+          .local-host/${host}/variables.nix
+
+        The installer should create this file from:
+
+          hosts/default/variables.nix
+      '';
+
+    # -----------------------------------------------------------------------
     # Packages
     # -----------------------------------------------------------------------
     pkgs = import nixpkgs {
@@ -184,30 +222,55 @@
           (
             host:
               let
+                # -----------------------------------------------------------
+                # Machine identity
+                # -----------------------------------------------------------
                 identity = hostIdentity host;
                 username = identity.username;
 
+                # -----------------------------------------------------------
+                # Machine-local host directory
+                # -----------------------------------------------------------
                 hostDir =
                   localHostRoot + "/${host}";
+
+                # -----------------------------------------------------------
+                # Machine-local variables
+                #
+                # Loaded once and passed into Home Manager as `hostVars`.
+                # -----------------------------------------------------------
+                hostVars =
+                  hostVariables host;
+
               in {
                 name = host;
 
                 value = nixpkgs.lib.nixosSystem {
                   inherit system;
 
+                  # ---------------------------------------------------------
+                  # NixOS special arguments
+                  #
+                  # These are available to NixOS modules as:
+                  #
+                  #   inputs
+                  #   username
+                  #   host
+                  #   pkgsUnstable
+                  #   hostVars
+                  # ---------------------------------------------------------
                   specialArgs = {
                     inherit
                       inputs
                       username
                       host
-                      pkgsUnstable;
+                      pkgsUnstable
+                      hostVars;
                   };
 
                   modules = [
                     # -------------------------------------------------------
                     # Machine-local host configuration
-                    #
-                    # This is the IMPORTANT part.
                     #
                     # Everything machine-specific comes from:
                     #
@@ -245,12 +308,30 @@
                       home-manager.backupFileExtension = "hm-bak";
                       home-manager.overwriteBackup = true;
 
+                      # -----------------------------------------------------
+                      # Home Manager special arguments
+                      #
+                      # IMPORTANT:
+                      #
+                      # Home Manager modules can now receive:
+                      #
+                      #   hostVars
+                      #
+                      # directly.
+                      #
+                      # They should NOT import:
+                      #
+                      #   ../../../hosts/${host}/variables.nix
+                      #
+                      # anymore.
+                      # -----------------------------------------------------
                       home-manager.extraSpecialArgs = {
                         inherit
                           inputs
                           system
                           username
-                          host;
+                          host
+                          hostVars;
                       };
 
                       home-manager.users.${username} = {
