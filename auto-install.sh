@@ -249,8 +249,7 @@ printf "\n%.0s" {1..1}
 # Set Nix CLI behavior for installer execution.
 export NIX_CONFIG=$'experimental-features = nix-command flakes\nwarn-dirty = false'
 #sudo nix flake update
-sudo nixos-rebuild switch --flake ~/NixOS-Hyprland/#"${hostName}"
-
+sudo nixos-rebuild switch --flake "$NHL_REPO_ROOT#${hostName}"
 if type nhl_run_luks_tpm_enrollment >/dev/null 2>&1; then
     nhl_run_luks_tpm_enrollment "$hostName"
 fi
