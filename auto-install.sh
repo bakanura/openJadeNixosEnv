@@ -1,4 +1,4 @@
-# Project source: https://github.com/JaKooLit/NixOS-Hyprland
+# Project source: https://github.com/LinuxBeginnings/NixOS-Hyprland
 
 #!/usr/bin/env bash
 clear
@@ -38,17 +38,21 @@ if [ -f "${SCRIPT_DIR}/scripts/lib/install-common.sh" ]; then
     . "${SCRIPT_DIR}/scripts/lib/install-common.sh"
 fi
 
+# Verify this is NixOS.
 if [ -n "$(grep -i nixos </etc/os-release)" ]; then
     echo "${OK} Verified this is NixOS."
     echo "-----"
 else
     echo "$ERROR This is not NixOS or the distribution information is not available."
     exit 1
+fi
+
 ensure_required_packages() {
     local config="/etc/nixos/configuration.nix"
     local missing=()
     local cmd
 
+    # command -> NixOS package
     declare -A packages=(
         [git]="git"
         [lspci]="pciutils"
@@ -67,7 +71,10 @@ ensure_required_packages() {
         fi
     done
 
+    # Everything is already available.
     if [ "${#missing[@]}" -eq 0 ]; then
+        echo "$OK All required packages are already available."
+        echo "-----"
         return 0
     fi
 
@@ -81,16 +88,25 @@ ensure_required_packages() {
     case "${choice,,}" in
         c|continue)
             echo "$NOTE Continuing without installing missing packages."
+            echo "-----"
             return 0
             ;;
         n|no)
             echo "$NOTE Skipping installation of missing packages."
+            echo "-----"
             return 0
             ;;
     esac
 
+    # Make sure configuration.nix exists.
+    if [ ! -f "$config" ]; then
+        echo "$ERROR $config does not exist."
+        exit 1
+    fi
+
     echo "$CAT Adding missing packages to $config..."
 
+    # Create environment.systemPackages if it does not exist.
     if ! grep -q 'environment\.systemPackages' "$config"; then
         cat <<'EOF' | sudo tee -a "$config" >/dev/null
 
@@ -99,9 +115,13 @@ environment.systemPackages = with pkgs; [
 EOF
     fi
 
+    # Add each missing package.
     for pkg in "${missing[@]}"; do
         if ! grep -qE "(^|[[:space:]])${pkg}([[:space:]]|$)" "$config"; then
-            sudo sed -i "/environment\.systemPackages = with pkgs; \[/a\\    ${pkg}" "$config"
+            sudo sed -i \
+                "/environment\.systemPackages = with pkgs; \[/a\\    ${pkg}" \
+                "$config"
+
             echo "$OK Added $pkg."
         else
             echo "$NOTE $pkg is already in the NixOS configuration."
@@ -118,6 +138,7 @@ EOF
 
     echo "$OK NixOS rebuild completed."
 
+    # Verify everything is available after the rebuild.
     for cmd in "${!packages[@]}"; do
         if ! command -v "$cmd" >/dev/null 2>&1; then
             echo "$ERROR $cmd is still unavailable after the rebuild."
@@ -126,8 +147,11 @@ EOF
     done
 
     echo "$OK All required packages are installed and available."
+    echo "-----"
 }
 
+# Ensure required packages are available before continuing.
+ensure_required_packages
 
 echo "$NOTE Switching to the home directory"
 cd || exit
