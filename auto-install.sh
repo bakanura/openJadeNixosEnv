@@ -429,11 +429,25 @@ else
 fi
 
 echo "$OK Host identity prepared for hosts/$hostName/identity.json"
+# Validate the dynamically-generated nixosConfigurations entry directly.
+# Do NOT use nhl_preflight_fresh_install_target here because this flake
+# generates nixosConfigurations from hostNames using builtins.listToAttrs.
+echo "$NOTE Validating nixosConfigurations.$hostName..."
 
-# Now the dynamically-generated flake should expose nixosConfigurations.$hostName.
-if type nhl_preflight_fresh_install_target >/dev/null 2>&1; then
-    nhl_preflight_fresh_install_target "${NHL_REPO_ROOT}" "$hostName" || exit 1
+if ! NIX_CONFIG='experimental-features = nix-command flakes' \
+    nix eval \
+    --raw \
+    "$NHL_REPO_ROOT#nixosConfigurations.\"${hostName}\".config.system.nixos.version" \
+    >/dev/null; then
+
+    echo "$ERROR The flake does not expose:"
+    echo "    nixosConfigurations.$hostName"
+    echo "$ERROR Installation cannot continue safely."
+    exit 1
 fi
+
+echo "$OK Flake exports nixosConfigurations.$hostName."
+
 # Reuse an existing host profile when the device is already enrolled.
 is_enrolled=0
 if type nhl_is_enrolled_device >/dev/null 2>&1 && nhl_is_enrolled_device "$hostName"; then
