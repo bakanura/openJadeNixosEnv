@@ -213,7 +213,6 @@ nhl_derive_hostname() {
 
   printf "%s\n" "$hostName"
 }
-
 nhl_prompt_hostname() {
   local default_prefix="${1:-NixOS}"
   local serial=""
@@ -233,11 +232,13 @@ nhl_prompt_hostname() {
     export NHL_SELECTED_HOSTNAME_MODE="prefix-serial"
     export NHL_SELECTED_HOSTNAME_PREFIX="$(
       nhl_sanitize_hostname "${NHL_STATE_HOSTNAME_PREFIX:-$default_prefix}"
-    )"
+    )
     export NHL_SELECTED_HOSTNAME_VALUE="$(
       nhl_derive_hostname "${NHL_SELECTED_HOSTNAME_PREFIX}"
-    )"
+    )
 
+    # stdout must contain ONLY the resulting hostname because callers use:
+    # hostName=$(nhl_prompt_hostname ...)
     printf "%s\n" "${NHL_SELECTED_HOSTNAME_VALUE}"
     return 0
   fi
@@ -255,13 +256,16 @@ nhl_prompt_hostname() {
       custom=$(nhl_sanitize_hostname "$custom")
 
       if [ -z "$custom" ] || [ "$custom" = "UNKNOWN-HOST" ]; then
-        echo "[WARN] Please enter a non-empty hostname."
+        printf '%s\n' \
+          "[WARN] Please enter a non-empty hostname." \
+          >&2
         continue
       fi
 
       export NHL_SELECTED_HOSTNAME_MODE="custom"
       export NHL_SELECTED_HOSTNAME_VALUE="$custom"
 
+      # stdout: hostname ONLY
       printf "%s\n" "${NHL_SELECTED_HOSTNAME_VALUE}"
       return 0
     fi
@@ -270,7 +274,12 @@ nhl_prompt_hostname() {
       break
     fi
 
-    echo "[WARN] Please choose 's' for syntax + serial or 'u' for a unique hostname."
+    # IMPORTANT:
+    # This must go to stderr because the caller captures stdout:
+    #   hostName=$(nhl_prompt_hostname ...)
+    printf '%s\n' \
+      "[WARN] Please choose 's' for syntax + serial or 'u' for a unique hostname." \
+      >&2
   done
 
   while true; do
@@ -284,7 +293,9 @@ nhl_prompt_hostname() {
       break
     fi
 
-    echo "[WARN] Please enter a non-empty hostname syntax/prefix."
+    printf '%s\n' \
+      "[WARN] Please enter a non-empty hostname syntax/prefix." \
+      >&2
   done
 
   export NHL_SELECTED_HOSTNAME_MODE="prefix-serial"
@@ -293,6 +304,7 @@ nhl_prompt_hostname() {
     nhl_derive_hostname "${NHL_SELECTED_HOSTNAME_PREFIX}"
   )"
 
+  # stdout: hostname ONLY
   printf "%s\n" "${NHL_SELECTED_HOSTNAME_VALUE}"
 }
 
