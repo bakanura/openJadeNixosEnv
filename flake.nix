@@ -38,18 +38,21 @@
     ...
   }: let
     system = "x86_64-linux";
+    hostEntries = builtins.readDir ./hosts;
+
     hostNames =
       builtins.filter
-      (name: (builtins.readDir ./hosts)."${name}" == "directory")
-      (builtins.attrNames (builtins.readDir ./hosts));
+        (name: hostEntries.${name} == "directory")
+        (builtins.attrNames hostEntries);
+
     hostIdentity = host: let
       identityPath = ./. + "/hosts/${host}/identity.json";
+
       identity =
         if builtins.pathExists identityPath
         then builtins.fromJSON (builtins.readFile identityPath)
-        else {};
     in {
-      username = identity.username or "roederp";
+      username = identity.username;
     };
 
     pkgs = import nixpkgs {
