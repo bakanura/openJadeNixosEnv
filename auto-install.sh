@@ -113,6 +113,136 @@ echo "$NOTE Selected hostname: $hostName"
 echo "-----"
 
 # ===========================================================================
+# MACHINE-LOCAL HOST PATHS
+#
+# THIS IS THE SINGLE SOURCE OF TRUTH FOR MACHINE-LOCAL FILES.
+#
+# Repository:
+#
+#   hosts/
+#   └── default/
+#       ├── config.nix
+#       ├── hardware.nix
+#       ├── packages-fonts.nix
+#       ├── users.nix
+#       └── variables.nix
+#
+#   .local-host/
+#   └── <hostname>/
+#       ├── config.nix
+#       ├── hardware.nix
+#       ├── packages-fonts.nix
+#       ├── users.nix
+#       ├── variables.nix
+#       ├── identity.json
+#       └── .installer-state.json
+#
+# hosts/default is centrally managed and Git-tracked.
+#
+# .local-host is machine-specific and Git-ignored.
+#
+# IMPORTANT:
+#
+# Everything below that refers to the current machine MUST use hostDir.
+# ===========================================================================
+
+localHostRoot="$NHL_REPO_ROOT/.local-host"
+hostDir="$localHostRoot/$hostName"
+
+export NHL_LOCAL_HOST_ROOT="$localHostRoot"
+export NHL_HOSTNAME="$hostName"
+export NHL_HOST_DIR="$hostDir"
+
+echo "$NOTE Machine-local host root:"
+echo "    $localHostRoot"
+
+echo "$NOTE Machine-local host directory:"
+echo "    $hostDir"
+
+echo "-----"
+
+# ===========================================================================
+# ENSURE MACHINE-LOCAL ROOT EXISTS
+# ===========================================================================
+
+if [ ! -d "$localHostRoot" ]; then
+    echo "$NOTE Creating machine-local host root..."
+
+    mkdir -p "$localHostRoot"
+
+    echo "$OK Created:"
+    echo "    $localHostRoot"
+fi
+
+# ===========================================================================
+# ENSURE CURRENT MACHINE HOST DIRECTORY EXISTS
+# ===========================================================================
+
+if [ -d "$hostDir" ]; then
+
+    echo "$NOTE Local host directory already exists:"
+    echo "    $hostDir"
+
+    echo "$NOTE Preserving existing machine-specific files."
+
+else
+
+    echo "$NOTE Creating local host directory:"
+    echo "    $hostDir"
+
+    mkdir -p "$hostDir"
+
+    echo "$OK Created:"
+    echo "    $hostDir"
+
+fi
+
+# ===========================================================================
+# ENSURE .local-host IS GIT-IGNORED
+#
+# The installer owns this directory.
+#
+# We deliberately add ONLY .gitignore to Git later.
+# Nothing under .local-host is staged.
+# ===========================================================================
+
+gitignore_file="$NHL_REPO_ROOT/.gitignore"
+
+touch "$gitignore_file"
+
+if grep -qxF '.local-host/' "$gitignore_file"; then
+
+    echo "$NOTE .local-host/ is already Git-ignored."
+
+else
+
+    printf '\n# Machine-local NixOS host configuration\n.local-host/\n' \
+        >> "$gitignore_file"
+
+    echo "$OK Added .local-host/ to .gitignore."
+
+fi
+
+# ===========================================================================
+# VERIFY GIT IGNORE
+# ===========================================================================
+
+if git check-ignore -q "$localHostRoot"; then
+
+    echo "$OK Confirmed .local-host/ is Git-ignored."
+
+else
+
+    echo "${ERROR} .local-host/ is not being ignored by Git."
+    echo
+    echo "${ERROR} Refusing to continue because machine-local configuration"
+    echo "${ERROR} must never become part of the tracked repository."
+
+    exit 1
+
+fi
+
+# ===========================================================================
 # USERNAME
 # ===========================================================================
 
@@ -128,97 +258,22 @@ if [ -z "$installusername" ]; then
 fi
 
 echo "$NOTE Installation username: $installusername"
-
-# ===========================================================================
-# LOCAL HOST DIRECTORY
-#
-# Repository layout:
-#
-#   hosts/
-#   └── default/
-#       ├── config.nix
-#       ├── hardware.nix
-#       ├── packages-fonts.nix
-#       ├── users.nix
-#       └── variables.nix
-#
-#   .local-host/
-#   └── <hostname>/
-#       ├── identity.json
-#       ├── hardware.nix
-#       ├── config.nix
-#       ├── packages-fonts.nix
-#       ├── users.nix
-#       ├── variables.nix
-#       └── .installer-state.json
-#
-# hosts/default is centrally managed and Git-tracked.
-#
-# .local-host is machine-specific and MUST be Git-ignored.
-#
-# hostDir is the single source of truth for all machine-local files.
-# ===========================================================================
-
-localHostRoot="$NHL_REPO_ROOT/.local-host"
-hostDir="$localHostRoot/$hostName"
-
-# Export these so shared installer functions can use the exact same location.
-export NHL_LOCAL_HOST_ROOT="$localHostRoot"
-export NHL_HOST_DIR="$hostDir"
-
 echo "-----"
-echo "$NOTE Machine-local configuration root:"
-echo "    $localHostRoot"
-
-if [ ! -d "$localHostRoot" ]; then
-    echo "$NOTE Creating machine-local host root..."
-    mkdir -p "$localHostRoot"
-    echo "$OK Created .local-host/"
-fi
-
-if [ -d "$hostDir" ]; then
-
-    echo "$NOTE Local host directory already exists:"
-    echo "    $hostDir"
-    echo "$NOTE Preserving existing machine-specific files."
-
-else
-
-    echo "$NOTE Creating local host directory:"
-    echo "    $hostDir"
-
-    mkdir -p "$hostDir"
-
-    echo "$OK Created .local-host/$hostName/"
-
-fi
 
 # ===========================================================================
-# ENSURE .local-host IS GIT-IGNORED
+# CREATE MACHINE-LOCAL HOST FILES
 #
-# This is intentionally handled by the installer so a fresh clone is safe.
-# ===========================================================================
-
-gitignore_file="$NHL_REPO_ROOT/.gitignore"
-
-touch "$gitignore_file"
-
-if ! grep -qxF '.local-host/' "$gitignore_file"; then
-    printf '\n# Machine-local NixOS host configuration\n.local-host/\n' \
-        >> "$gitignore_file"
-
-    echo "$OK Added .local-host/ to .gitignore."
-else
-    echo "$NOTE .local-host/ is already Git-ignored."
-fi
-
-# ===========================================================================
-# CREATE HOST TEMPLATE FILES
+# The centrally managed templates live under:
 #
-# The machine-local host starts from hosts/default/.
+#   hosts/default/
 #
-# These files are copied once. Existing machine-specific versions are
-# preserved on subsequent installer runs.
+# They are copied into:
+#
+#   .local-host/<hostname>/
+#
+# ONLY when the local file does not already exist.
+#
+# This means subsequent installer runs preserve machine-specific changes.
 # ===========================================================================
 
 required_host_files=(
@@ -229,66 +284,64 @@ required_host_files=(
     "hardware.nix"
 )
 
+echo "$NOTE Preparing machine-local host configuration..."
+
 for host_file in "${required_host_files[@]}"; do
 
     target="$hostDir/$host_file"
     template="$NHL_REPO_ROOT/hosts/default/$host_file"
 
     if [ -f "$target" ]; then
-        echo "$NOTE Preserving existing .local-host/$hostName/$host_file"
+
+        echo "$NOTE Preserving existing:"
+        echo "    .local-host/$hostName/$host_file"
+
         continue
     fi
 
     if [ ! -f "$template" ]; then
+
         echo "${ERROR} Missing default template:"
-        echo "        $template"
+        echo "    $template"
+
         exit 1
     fi
 
     cp "$template" "$target"
 
-    echo "$OK Created .local-host/$hostName/$host_file"
+    echo "$OK Created:"
+    echo "    .local-host/$hostName/$host_file"
 
 done
 
-echo "$OK Local host template is complete."
+echo "$OK Machine-local host template is complete."
 
 # ===========================================================================
 # HOST IDENTITY
 #
-# identity.json is machine-local and therefore belongs in .local-host/.
+# Identity is machine-local.
 #
-# Do NOT patch flake.nix.
-# Do NOT write identity.json into hosts/.
+# It MUST NOT be written to:
+#
+#   hosts/<hostname>/identity.json
+#
+# It MUST NOT modify flake.nix.
+#
+# It lives here:
+#
+#   .local-host/<hostname>/identity.json
 # ===========================================================================
 
 identity_file="$hostDir/identity.json"
 
-if [ -f "$identity_file" ]; then
-
-    echo "$NOTE Existing host identity found:"
-    echo "    $identity_file"
-
-else
-
-    cat > "$identity_file" <<EOF
-{
-  "username": "$installusername"
-}
-EOF
-
-    echo "$OK Created .local-host/$hostName/identity.json"
-
-fi
-
-# Always make sure the current installation username is represented.
 cat > "$identity_file" <<EOF
 {
   "username": "$installusername"
 }
 EOF
 
-echo "$OK Host identity prepared for .local-host/$hostName/identity.json"
+echo "$OK Host identity prepared:"
+echo "    $identity_file"
 
 echo "-----"
 
@@ -304,16 +357,18 @@ if type nhl_is_enrolled_device >/dev/null 2>&1 \
     is_enrolled=1
 
     echo "$NOTE Existing enrolled device detected for host '$hostName'."
-    echo "$NOTE Reusing host profile."
+    echo "$NOTE Reusing machine-local host profile."
 
 fi
 
 # ===========================================================================
 # LOAD PREVIOUS INSTALLER STATE
 #
-# Shared installer functions should use NHL_HOST_DIR.
+# Shared installer functions should honor:
 #
-# The state file belongs beside identity.json:
+#   NHL_HOST_DIR
+#
+# and therefore store state at:
 #
 #   .local-host/<hostname>/.installer-state.json
 # ===========================================================================
@@ -364,9 +419,12 @@ fi
 variables_file="$hostDir/variables.nix"
 
 if [ ! -f "$variables_file" ]; then
+
     echo "${ERROR} Missing variables.nix:"
-    echo "        $variables_file"
+    echo "    $variables_file"
+
     exit 1
+
 fi
 
 # Safely update keyboardLayout.
@@ -412,9 +470,9 @@ fi
 echo "-----"
 
 # ===========================================================================
-# IDENTITY UPDATE
+# HOST IDENTITY UPDATE
 #
-# Keep identity handling entirely local.
+# Keep this entirely local.
 # ===========================================================================
 
 cat > "$identity_file" <<EOF
@@ -423,14 +481,19 @@ cat > "$identity_file" <<EOF
 }
 EOF
 
-echo "$OK Host identity updated."
+echo "$OK Host identity updated:"
+echo "    $identity_file"
 
 # ===========================================================================
 # HARDWARE CONFIGURATION
 #
-# This is machine-specific and therefore belongs in:
+# Hardware is machine-specific.
+#
+# It belongs at:
 #
 #   .local-host/<hostname>/hardware.nix
+#
+# and is imported by the machine-local config.nix.
 # ===========================================================================
 
 echo "$NOTE Generating hardware configuration"
@@ -442,7 +505,8 @@ max_attempts=3
 
 while [ "$attempts" -lt "$max_attempts" ]; do
 
-    # Existing enrolled machine: don't overwrite known-good hardware config.
+    # Existing enrolled machine:
+    # preserve known-good hardware configuration.
     if [ "$is_enrolled" -eq 1 ] && [ -s "$hardware_file" ]; then
 
         echo "$NOTE Existing hardware configuration found for enrolled device."
@@ -452,7 +516,8 @@ while [ "$attempts" -lt "$max_attempts" ]; do
 
     fi
 
-    # Fresh installation: generate hardware configuration.
+    # Fresh installation:
+    # generate hardware configuration.
     if sudo nixos-generate-config \
         --show-hardware-config \
         >"$hardware_file" \
@@ -460,7 +525,9 @@ while [ "$attempts" -lt "$max_attempts" ]; do
 
         if [ -s "$hardware_file" ]; then
 
-            echo "$OK Hardware configuration successfully generated."
+            echo "$OK Hardware configuration successfully generated:"
+            echo "    $hardware_file"
+
             break
 
         fi
@@ -508,9 +575,12 @@ echo "-----"
 # ===========================================================================
 # SAVE INSTALLER STATE
 #
-# State belongs in .local-host/<hostname>/.
+# The state belongs in:
 #
-# NHL_HOST_DIR is exported above so the common function can use it.
+#   .local-host/<hostname>/.installer-state.json
+#
+# NHL_HOST_DIR is exported above so the common installer library can use
+# the exact same location.
 # ===========================================================================
 
 if type nhl_save_installer_state >/dev/null 2>&1; then
@@ -530,50 +600,129 @@ if type nhl_save_installer_state >/dev/null 2>&1; then
 fi
 
 # ===========================================================================
-# SAFETY CHECK FOR LOCAL STATE
+# LEGACY STATE MIGRATION
 #
-# If the shared function still uses its legacy location, move the generated
-# state into .local-host/.
+# Older versions of the installer may have created:
+#
+#   hosts/<hostname>/.installer-state.json
+#
+# If that exists, migrate it into the new machine-local location.
 # ===========================================================================
 
-legacy_state="$NHL_REPO_ROOT/hosts/$hostName/.installer-state.json"
+legacy_host_dir="$NHL_REPO_ROOT/hosts/$hostName"
+legacy_state="$legacy_host_dir/.installer-state.json"
 local_state="$hostDir/.installer-state.json"
 
-if [ -f "$legacy_state" ] && [ "$legacy_state" != "$local_state" ]; then
+if [ -f "$legacy_state" ]; then
 
-    echo "$NOTE Migrating legacy installer state to .local-host/"
+    echo "$NOTE Found legacy installer state:"
+    echo "    $legacy_state"
 
-    mv "$legacy_state" "$local_state"
+    if [ ! -f "$local_state" ]; then
 
-    if [ -d "$NHL_REPO_ROOT/hosts/$hostName" ]; then
-        rmdir "$NHL_REPO_ROOT/hosts/$hostName" 2>/dev/null || true
+        echo "$NOTE Migrating legacy installer state to:"
+        echo "    $local_state"
+
+        mv "$legacy_state" "$local_state"
+
+        echo "$OK Installer state migrated."
+
+    else
+
+        echo "$NOTE Local installer state already exists."
+        echo "$NOTE Keeping current .local-host state."
+
+        rm -f "$legacy_state"
+
     fi
 
-    echo "$OK Installer state moved to:"
-    echo "    $local_state"
+fi
+
+# ===========================================================================
+# LEGACY HOST DIRECTORY CLEANUP
+#
+# The new architecture must NEVER leave:
+#
+#   hosts/<hostname>/
+#
+# behind.
+#
+# hosts/default/ is the only host directory that should remain under hosts/.
+# ===========================================================================
+
+if [ -d "$legacy_host_dir" ]; then
+
+    echo "$NOTE Removing obsolete legacy host directory:"
+    echo "    $legacy_host_dir"
+
+    # Only remove files that belong to the old installer architecture.
+    for legacy_file in \
+        config.nix \
+        hardware.nix \
+        packages-fonts.nix \
+        users.nix \
+        variables.nix \
+        identity.json \
+        .installer-state.json
+    do
+        rm -f "$legacy_host_dir/$legacy_file"
+    done
+
+    rmdir "$legacy_host_dir" 2>/dev/null || true
 
 fi
+
+# ===========================================================================
+# VERIFY MACHINE-LOCAL FILES
+# ===========================================================================
+
+echo "-----"
+
+echo "$NOTE Verifying machine-local host files..."
+
+for host_file in "${required_host_files[@]}"; do
+
+    if [ ! -f "$hostDir/$host_file" ]; then
+
+        echo "${ERROR} Required machine-local file is missing:"
+        echo "    $hostDir/$host_file"
+
+        exit 1
+
+    fi
+
+done
+
+if [ ! -f "$identity_file" ]; then
+
+    echo "${ERROR} Missing host identity:"
+    echo "    $identity_file"
+
+    exit 1
+
+fi
+
+echo "$OK Machine-local host configuration is complete."
 
 # ===========================================================================
 # FLAKE VALIDATION
 #
 # IMPORTANT:
 #
-# .local-host is intentionally Git-ignored.
+# .local-host/ is Git-ignored.
 #
-# Therefore:
+# Do NOT use:
 #
-#   nix eval "$NHL_REPO_ROOT#..."
+#   $NHL_REPO_ROOT#...
 #
-# is NOT safe here because Nix may interpret the repository as git+file and
-# omit ignored files.
+# because Nix may resolve a Git working tree as a git+file flake and omit
+# ignored machine-local files.
 #
-# We explicitly use:
+# Explicitly use:
 #
 #   path:$NHL_REPO_ROOT
 #
-# which makes Nix evaluate the complete local filesystem tree, including
-# .local-host/.
+# so the local filesystem is used as the flake source.
 # ===========================================================================
 
 echo "-----"
@@ -594,12 +743,16 @@ if ! nix eval \
     echo "    nixosConfigurations.${hostName}"
     echo
 
-    echo "${WARN} Local host directory:"
+    echo "${WARN} Machine-local host directory:"
     echo "    $hostDir"
     echo
 
     echo "${WARN} Files currently present:"
-    find "$hostDir" -maxdepth 1 -type f -printf '    %f\n' \
+
+    find "$hostDir" \
+        -maxdepth 1 \
+        -type f \
+        -printf '    %f\n' \
         | sort \
         || true
 
@@ -612,6 +765,7 @@ if ! nix eval \
     echo
 
     echo "${ERROR} Installation cannot continue safely."
+
     exit 1
 
 fi
@@ -619,21 +773,50 @@ fi
 echo "$OK Flake exports nixosConfigurations.$hostName."
 
 # ===========================================================================
-# STAGE TRACKED INSTALLER CHANGES
-#
-# NEVER git-add .local-host/.
-#
-# The .gitignore entry itself is tracked, while machine-local configuration
-# remains private to the installation.
+# VERIFY GIT DOES NOT SEE MACHINE-LOCAL FILES
 # ===========================================================================
 
-echo "$NOTE Applying required Nix settings before installation"
+echo "$NOTE Verifying machine-local configuration is not tracked..."
+
+if git status --short --untracked-files=all -- "$localHostRoot" \
+    | grep -q .; then
+
+    echo "${ERROR} Git can see files under .local-host/."
+
+    echo
+    git status --short --untracked-files=all -- "$localHostRoot" || true
+    echo
+
+    echo "${ERROR} Refusing to continue."
+    echo "${ERROR} Machine-local configuration must remain ignored."
+
+    exit 1
+
+fi
+
+echo "$OK Machine-local configuration is safely ignored by Git."
+
+# ===========================================================================
+# STAGE TRACKED INSTALLER CHANGES
+#
+# ONLY .gitignore is intentionally staged here.
+#
+# NEVER:
+#
+#   git add .
+#
+# because that risks staging machine-local configuration if .gitignore
+# changes or Git behavior change.
+# ===========================================================================
+
+echo "$NOTE Applying required Git settings before installation"
 
 git config --global user.name "installer"
 git config --global user.email "installer@gmail.com"
 
-git add .gitignore
+git add "$gitignore_file"
 
+echo "$OK .gitignore staged."
 echo "$OK Machine-local configuration remains Git-ignored."
 
 # ===========================================================================
@@ -650,11 +833,20 @@ if ! nix eval \
 
     echo "${ERROR} Final flake validation failed."
     echo
+
     echo "${ERROR} Expected:"
     echo "    nixosConfigurations.${hostName}"
+
     echo
-    echo "${WARN} Local host directory:"
+
+    echo "${WARN} Machine-local host directory:"
     echo "    $hostDir"
+
+    echo
+
+    echo "${NOTE} Current flake configurations:"
+    nix flake show "path:$NHL_REPO_ROOT" 2>&1 || true
+
     exit 1
 
 fi
@@ -690,8 +882,10 @@ if ! sudo nixos-rebuild switch \
     echo
     echo "${ERROR} NixOS rebuild failed."
     echo
+
     echo "${WARN} Rebuild target:"
     echo "    path:$NHL_REPO_ROOT#${hostName}"
+
     echo
 
     echo "${NOTE} Available configurations:"
@@ -754,9 +948,13 @@ if [ -f "$HOME/.zshrc" ]; then
 fi
 
 if [ -f "$NHL_REPO_ROOT/assets/.zshrc" ]; then
+
     cp -f "$NHL_REPO_ROOT/assets/.zshrc" "$HOME/.zshrc"
+
 else
+
     echo "${WARN} assets/.zshrc was not found. Skipping."
+
 fi
 
 # ===========================================================================
@@ -768,6 +966,7 @@ printf "Installing GTK-Themes and Icons..\n"
 if [ -d "$NHL_REPO_ROOT/GTK-themes-icons" ]; then
 
     echo "$NOTE GTK themes and Icons directory exists..deleting..."
+
     rm -rf "$NHL_REPO_ROOT/GTK-themes-icons"
 
 fi
@@ -784,9 +983,13 @@ if git clone \
     chmod +x auto-extract.sh
 
     if ./auto-extract.sh; then
+
         echo "$OK Extracted GTK Themes & Icons to ~/.icons & ~/.themes directories"
+
     else
+
         echo "$ERROR GTK theme extraction failed."
+
     fi
 
     cd "$NHL_REPO_ROOT"
@@ -818,9 +1021,13 @@ for DIR1 in gtk-3.0 Thunar xfce4; do
         echo -e "${NOTE} Config for $DIR1 not found, copying from assets."
 
         if cp -r "$NHL_REPO_ROOT/assets/$DIR1" "$HOME/.config/"; then
+
             echo "Copy $DIR1 completed!"
+
         else
+
             echo "Error: Failed to copy $DIR1 config files."
+
         fi
 
     fi
@@ -838,6 +1045,7 @@ printf "\n%.0s" {1..3}
 if [ -d "$NHL_REPO_ROOT/GTK-themes-icons" ]; then
 
     echo "$NOTE GTK themes and Icons directory exists..deleting..."
+
     rm -rf "$NHL_REPO_ROOT/GTK-themes-icons"
 
 fi
@@ -901,10 +1109,15 @@ cd "$NHL_REPO_ROOT" || exit 1
 if [ ! -f "$HOME/.config/fastfetch/nixos.png" ]; then
 
     if [ -d "$NHL_REPO_ROOT/assets/fastfetch" ]; then
+
         mkdir -p "$HOME/.config"
+
         cp -r "$NHL_REPO_ROOT/assets/fastfetch" "$HOME/.config/"
+
     else
+
         echo "${WARN} assets/fastfetch does not exist. Skipping."
+
     fi
 
 fi
@@ -945,6 +1158,7 @@ if command -v Hyprland >/dev/null 2>&1; then
 else
 
     printf "\n${WARN} Hyprland failed to install. Please check Install-Logs...${RESET}\n\n"
+
     exit 1
 
 fi
