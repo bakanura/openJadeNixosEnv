@@ -46,6 +46,8 @@ else
     echo "$ERROR This is not NixOS or the distribution information is not available."
     exit 1
 
+nhl_ensure_required_packages
+
 echo "$NOTE Switching to the home directory"
 cd || exit
 
