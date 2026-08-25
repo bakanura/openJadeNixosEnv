@@ -92,7 +92,7 @@ fi
 echo "-----"
 
 echo "$NOTE Cloning and entering the NixOS-Hyprland repository"
-git clone --depth 1 https://github.com/JaKooLit/NixOS-Hyprland.git ~/NixOS-Hyprland
+git clone --depth 1 https://github.com/LinuxBeginnings/NixOS-Hyprland.git ~/NixOS-Hyprland
 cd ~/NixOS-Hyprland || exit
 export NHL_REPO_ROOT="${HOME}/NixOS-Hyprland"
 
