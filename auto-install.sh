@@ -44,68 +44,90 @@ if [ -n "$(grep -i nixos </etc/os-release)" ]; then
 else
     echo "$ERROR This is not NixOS or the distribution information is not available."
     exit 1
-fi
+ensure_required_packages() {
+    local config="/etc/nixos/configuration.nix"
+    local missing=()
+    local cmd
 
-if command -v git &>/dev/null; then
-    echo "$OK Git is installed, continuing with installation."
-    echo "-----"
-else
-    echo "$ERROR Git is not installed. Please install Git and try again."
-    echo "Example: nix-shell -p git"
-    exit 1
-fi
+    declare -A packages=(
+        [git]="git"
+        [lspci]="pciutils"
+        [go]="go"
+        [fwupdmgr]="fwupd"
+    )
 
-# Verify pciutils availability (lspci).
-if ! command -v lspci >/dev/null 2>&1; then
-    echo "$ERROR pciutils is not installed. Please install pciutils and try again."
-    echo "Example: nix-shell -p pciutils"
-    exit 1
-fi
+    echo "$CAT Checking required packages..."
 
-# Verify Go version compatibility for waybar-weather.
-if type nhl_check_go_version >/dev/null 2>&1; then
-    nhl_check_go_version
-fi
+    for cmd in "${!packages[@]}"; do
+        if command -v "$cmd" >/dev/null 2>&1; then
+            echo "$OK $cmd is installed."
+        else
+            echo "$WARN $cmd is not installed."
+            missing+=("${packages[$cmd]}")
+        fi
+    done
 
-# Verify fwupd availability.
-if ! command -v fwupd >/dev/null 2>&1; then
-    echo "$WARN fwupd is not installed."
+    if [ "${#missing[@]}" -eq 0 ]; then
+        return 0
+    fi
 
-    read -r -p "Install fwupd and rebuild NixOS now? [Y/n/c=continue] " fwupd_choice
+    echo
+    echo "$WARN The following required packages are missing:"
+    printf '  - %s\n' "${missing[@]}"
+    echo
 
-    case "${fwupd_choice,,}" in
+    read -r -p "Add them to NixOS and rebuild now? [Y/n/c=continue without them] " choice
+
+    case "${choice,,}" in
         c|continue)
-            echo "$NOTE Continuing without fwupd."
+            echo "$NOTE Continuing without installing missing packages."
+            return 0
             ;;
         n|no)
-            echo "$NOTE Skipping fwupd installation."
-            ;;
-        *)
-            echo "$CAT Adding fwupd to the NixOS configuration..."
-
-            CONFIG="/etc/nixos/configuration.nix"
-
-            if ! grep -qE '(^|[[:space:]])fwupd([[:space:]]|$)' "$CONFIG"; then
-                sudo sed -i '/environment\.systemPackages = with pkgs; \[/a\    fwupd' "$CONFIG"
-                echo "$OK Added fwupd to $CONFIG."
-            else
-                echo "$NOTE fwupd is already present in the NixOS configuration."
-            fi
-
-            echo "$CAT Rebuilding NixOS before continuing..."
-            sudo nixos-rebuild switch
-
-            if ! command -v fwupd >/dev/null 2>&1; then
-                echo "$ERROR fwupd is still not available after the NixOS rebuild."
-                exit 1
-            fi
-
-            echo "$OK fwupd is installed and ready."
+            echo "$NOTE Skipping installation of missing packages."
+            return 0
             ;;
     esac
-else
-    echo "$OK fwupd is already installed."
-fi
+
+    echo "$CAT Adding missing packages to $config..."
+
+    if ! grep -q 'environment\.systemPackages' "$config"; then
+        cat <<'EOF' | sudo tee -a "$config" >/dev/null
+
+environment.systemPackages = with pkgs; [
+];
+EOF
+    fi
+
+    for pkg in "${missing[@]}"; do
+        if ! grep -qE "(^|[[:space:]])${pkg}([[:space:]]|$)" "$config"; then
+            sudo sed -i "/environment\.systemPackages = with pkgs; \[/a\\    ${pkg}" "$config"
+            echo "$OK Added $pkg."
+        else
+            echo "$NOTE $pkg is already in the NixOS configuration."
+        fi
+    done
+
+    echo
+    echo "$CAT Rebuilding NixOS before continuing..."
+
+    if ! sudo nixos-rebuild switch; then
+        echo "$ERROR NixOS rebuild failed."
+        exit 1
+    fi
+
+    echo "$OK NixOS rebuild completed."
+
+    for cmd in "${!packages[@]}"; do
+        if ! command -v "$cmd" >/dev/null 2>&1; then
+            echo "$ERROR $cmd is still unavailable after the rebuild."
+            exit 1
+        fi
+    done
+
+    echo "$OK All required packages are installed and available."
+}
+
 
 echo "$NOTE Switching to the home directory"
 cd || exit
