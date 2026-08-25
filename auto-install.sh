@@ -434,41 +434,34 @@ echo "$OK Host identity prepared for hosts/$hostName/identity.json"
 if type nhl_preflight_fresh_install_target >/dev/null 2>&1; then
     nhl_preflight_fresh_install_target "${NHL_REPO_ROOT}" "$hostName" || exit 1
 fi
-
+# Reuse an existing host profile when the device is already enrolled.
 is_enrolled=0
-
-if type nhl_is_enrolled_device >/dev/null 2>&1 \
-    && nhl_is_enrolled_device "$hostName"; then
-
+if type nhl_is_enrolled_device >/dev/null 2>&1 && nhl_is_enrolled_device "$hostName"; then
     is_enrolled=1
-
-    echo "$NOTE Existing enrolled device detected for host '$hostName'."
-    echo "$NOTE Reusing host profile."
+    echo "$NOTE Existing enrolled device detected for host '$hostName'. Reusing host profile."
 fi
 
-# ---------------------------------------------------------------------------
-# Create host profile.
-# ---------------------------------------------------------------------------
-if [ "$is_enrolled" -eq 0 ]; then
+# Create or repair the host profile.
+if [ ! -d "hosts/$hostName" ]; then
+    mkdir -p "hosts/$hostName"
+    echo "$NOTE Created host directory hosts/$hostName."
+fi
 
-    if [ ! -d "hosts/$hostName" ]; then
-
-        mkdir -p "hosts/$hostName"
-
-        if [ -d "hosts/default" ]; then
-            cp hosts/default/*.nix "hosts/$hostName/"
+for host_file in config.nix variables.nix; do
+    if [ ! -f "hosts/$hostName/$host_file" ]; then
+        if [ -f "hosts/default/$host_file" ]; then
+            cp "hosts/default/$host_file" "hosts/$hostName/$host_file"
+            echo "$OK Created hosts/$hostName/$host_file from default."
         else
-            echo "${ERROR} hosts/default does not exist."
+            echo "$ERROR Required template hosts/default/$host_file does not exist."
             exit 1
         fi
-
-        echo "$OK Created new host profile at hosts/$hostName."
-
     else
-        echo "$NOTE Host directory hosts/$hostName already exists."
-        echo "$NOTE Preserving existing files."
+        echo "$NOTE Preserving existing hosts/$hostName/$host_file."
     fi
-fi
+done
+
+echo "$OK Host profile is ready at hosts/$hostName."
 
 # ---------------------------------------------------------------------------
 # Load previous installer state.
@@ -509,9 +502,24 @@ else
     fi
 fi
 
-sed -i \
-    's/keyboardLayout\s*=\s*"\([^"]*\)"/keyboardLayout = "'"$keyboardLayout"'"/' \
-    "./hosts/$hostName/variables.nix"
+variables_file="$NHL_REPO_ROOT/hosts/$hostName/variables.nix"
+
+if [ ! -f "$variables_file" ]; then
+    echo "${ERROR} Missing required host variables file:"
+    echo "        $variables_file"
+    exit 1
+fi
+
+if grep -qE 'keyboardLayout\s*=' "$variables_file"; then
+    sed -i \
+        's/keyboardLayout\s*=\s*"[^"]*"/keyboardLayout = "'"$keyboardLayout"'"/' \
+        "$variables_file"
+else
+    echo 'keyboardLayout = "'"$keyboardLayout"'"' >> "$variables_file"
+fi
+
+echo "$OK Keyboard layout configured: $keyboardLayout"
+
 
 # ---------------------------------------------------------------------------
 # Configure timezone and console keymap.
