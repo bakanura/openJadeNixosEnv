@@ -64,9 +64,7 @@ nhl_ensure_required_packages
 # ---------------------------------------------------------------------------
 # Repository.
 #
-# auto-install.sh is now expected to be running from the cloned repository.
-# This avoids cloning another copy and losing the modifications being made
-# during installation.
+# auto-install.sh is expected to be running from the cloned repository.
 # ---------------------------------------------------------------------------
 echo "$NOTE Using the current installer repository"
 
@@ -132,42 +130,95 @@ fi
 echo "$NOTE Installation username: $installusername"
 
 # ===========================================================================
-# HOST DIRECTORY
+# LOCAL HOST DIRECTORY
 #
-# IMPORTANT:
+# Repository layout:
 #
-# The flake uses:
+#   hosts/
+#   └── default/
+#       ├── config.nix
+#       ├── hardware.nix
+#       ├── packages-fonts.nix
+#       ├── users.nix
+#       └── variables.nix
 #
-#   hostNames =
-#     builtins.filter
-#       (...)
-#       (builtins.attrNames (builtins.readDir ./hosts));
+#   .local-host/
+#   └── <hostname>/
+#       ├── identity.json
+#       ├── hardware.nix
+#       ├── config.nix
+#       ├── packages-fonts.nix
+#       ├── users.nix
+#       ├── variables.nix
+#       └── .installer-state.json
 #
-# Therefore creating hosts/<hostname>/ automatically makes the hostname
-# eligible for nixosConfigurations.
+# hosts/default is centrally managed and Git-tracked.
 #
-# BUT config.nix imports:
+# .local-host is machine-specific and MUST be Git-ignored.
 #
-#   ./hardware.nix
-#   ./users.nix
-#   ./packages-fonts.nix
-#
-# so ALL template files must exist before nix eval can succeed.
+# hostDir is the single source of truth for all machine-local files.
 # ===========================================================================
 
-hostDir="$NHL_REPO_ROOT/hosts/$hostName"
+localHostRoot="$NHL_REPO_ROOT/.local-host"
+hostDir="$localHostRoot/$hostName"
+
+# Export these so shared installer functions can use the exact same location.
+export NHL_LOCAL_HOST_ROOT="$localHostRoot"
+export NHL_HOST_DIR="$hostDir"
+
+echo "-----"
+echo "$NOTE Machine-local configuration root:"
+echo "    $localHostRoot"
+
+if [ ! -d "$localHostRoot" ]; then
+    echo "$NOTE Creating machine-local host root..."
+    mkdir -p "$localHostRoot"
+    echo "$OK Created .local-host/"
+fi
 
 if [ -d "$hostDir" ]; then
-    echo "$NOTE Host directory hosts/$hostName already exists."
-    echo "$NOTE Preserving existing files."
+
+    echo "$NOTE Local host directory already exists:"
+    echo "    $hostDir"
+    echo "$NOTE Preserving existing machine-specific files."
+
 else
-    echo "$NOTE Creating host directory hosts/$hostName..."
+
+    echo "$NOTE Creating local host directory:"
+    echo "    $hostDir"
+
     mkdir -p "$hostDir"
-    echo "$OK Created hosts/$hostName."
+
+    echo "$OK Created .local-host/$hostName/"
+
 fi
 
 # ===========================================================================
-# CREATE HOST TEMPLATE FILES BEFORE FLAKE VALIDATION
+# ENSURE .local-host IS GIT-IGNORED
+#
+# This is intentionally handled by the installer so a fresh clone is safe.
+# ===========================================================================
+
+gitignore_file="$NHL_REPO_ROOT/.gitignore"
+
+touch "$gitignore_file"
+
+if ! grep -qxF '.local-host/' "$gitignore_file"; then
+    printf '\n# Machine-local NixOS host configuration\n.local-host/\n' \
+        >> "$gitignore_file"
+
+    echo "$OK Added .local-host/ to .gitignore."
+else
+    echo "$NOTE .local-host/ is already Git-ignored."
+fi
+
+# ===========================================================================
+# CREATE HOST TEMPLATE FILES
+#
+# The machine-local host starts from hosts/default/.
+#
+# These files are copied once. Existing machine-specific versions are
+# preserved on subsequent installer runs.
 # ===========================================================================
 
 required_host_files=(
@@ -184,7 +235,7 @@ for host_file in "${required_host_files[@]}"; do
     template="$NHL_REPO_ROOT/hosts/default/$host_file"
 
     if [ -f "$target" ]; then
-        echo "$NOTE Preserving existing hosts/$hostName/$host_file"
+        echo "$NOTE Preserving existing .local-host/$hostName/$host_file"
         continue
     fi
 
@@ -196,35 +247,48 @@ for host_file in "${required_host_files[@]}"; do
 
     cp "$template" "$target"
 
-    echo "$OK Created hosts/$hostName/$host_file"
+    echo "$OK Created .local-host/$hostName/$host_file"
+
 done
 
-echo "$OK Host template is complete."
+echo "$OK Local host template is complete."
 
 # ===========================================================================
 # HOST IDENTITY
 #
-# This must happen after the directory exists, but before evaluating the flake
-# because flake.nix reads hosts/<host>/identity.json to determine username.
+# identity.json is machine-local and therefore belongs in .local-host/.
+#
+# Do NOT patch flake.nix.
+# Do NOT write identity.json into hosts/.
 # ===========================================================================
 
-if type nhl_patch_flake_identity >/dev/null 2>&1; then
+identity_file="$hostDir/identity.json"
 
-    if ! nhl_patch_flake_identity \
-        "$NHL_REPO_ROOT" \
-        "$hostName" \
-        "$installusername"; then
+if [ -f "$identity_file" ]; then
 
-        echo "${ERROR} Failed to write host identity."
-        exit 1
-    fi
+    echo "$NOTE Existing host identity found:"
+    echo "    $identity_file"
 
 else
-    echo "${ERROR} nhl_patch_flake_identity is unavailable."
-    exit 1
+
+    cat > "$identity_file" <<EOF
+{
+  "username": "$installusername"
+}
+EOF
+
+    echo "$OK Created .local-host/$hostName/identity.json"
+
 fi
 
-echo "$OK Host identity prepared for hosts/$hostName/identity.json"
+# Always make sure the current installation username is represented.
+cat > "$identity_file" <<EOF
+{
+  "username": "$installusername"
+}
+EOF
+
+echo "$OK Host identity prepared for .local-host/$hostName/identity.json"
 
 echo "-----"
 
@@ -246,6 +310,12 @@ fi
 
 # ===========================================================================
 # LOAD PREVIOUS INSTALLER STATE
+#
+# Shared installer functions should use NHL_HOST_DIR.
+#
+# The state file belongs beside identity.json:
+#
+#   .local-host/<hostname>/.installer-state.json
 # ===========================================================================
 
 if type nhl_load_installer_state >/dev/null 2>&1 \
@@ -343,23 +413,24 @@ echo "-----"
 
 # ===========================================================================
 # IDENTITY UPDATE
+#
+# Keep identity handling entirely local.
 # ===========================================================================
 
-if type nhl_patch_flake_identity >/dev/null 2>&1; then
+cat > "$identity_file" <<EOF
+{
+  "username": "$installusername"
+}
+EOF
 
-    nhl_patch_flake_identity \
-        "$NHL_REPO_ROOT" \
-        "$hostName" \
-        "$installusername"
-
-fi
+echo "$OK Host identity updated."
 
 # ===========================================================================
 # HARDWARE CONFIGURATION
 #
-# This MUST happen before the flake is evaluated.
+# This is machine-specific and therefore belongs in:
 #
-# hosts/default/config.nix imports ./hardware.nix.
+#   .local-host/<hostname>/hardware.nix
 # ===========================================================================
 
 echo "$NOTE Generating hardware configuration"
@@ -378,9 +449,10 @@ while [ "$attempts" -lt "$max_attempts" ]; do
         echo "$NOTE Keeping current hardware.nix."
 
         break
+
     fi
 
-    # For a fresh installation, generate a new hardware configuration.
+    # Fresh installation: generate hardware configuration.
     if sudo nixos-generate-config \
         --show-hardware-config \
         >"$hardware_file" \
@@ -392,6 +464,7 @@ while [ "$attempts" -lt "$max_attempts" ]; do
             break
 
         fi
+
     fi
 
     rm -f "$hardware_file"
@@ -409,6 +482,7 @@ while [ "$attempts" -lt "$max_attempts" ]; do
     fi
 
     sleep 1
+
 done
 
 echo "-----"
@@ -433,6 +507,10 @@ echo "-----"
 
 # ===========================================================================
 # SAVE INSTALLER STATE
+#
+# State belongs in .local-host/<hostname>/.
+#
+# NHL_HOST_DIR is exported above so the common function can use it.
 # ===========================================================================
 
 if type nhl_save_installer_state >/dev/null 2>&1; then
@@ -452,21 +530,50 @@ if type nhl_save_installer_state >/dev/null 2>&1; then
 fi
 
 # ===========================================================================
+# SAFETY CHECK FOR LOCAL STATE
+#
+# If the shared function still uses its legacy location, move the generated
+# state into .local-host/.
+# ===========================================================================
+
+legacy_state="$NHL_REPO_ROOT/hosts/$hostName/.installer-state.json"
+local_state="$hostDir/.installer-state.json"
+
+if [ -f "$legacy_state" ] && [ "$legacy_state" != "$local_state" ]; then
+
+    echo "$NOTE Migrating legacy installer state to .local-host/"
+
+    mv "$legacy_state" "$local_state"
+
+    if [ -d "$NHL_REPO_ROOT/hosts/$hostName" ]; then
+        rmdir "$NHL_REPO_ROOT/hosts/$hostName" 2>/dev/null || true
+    fi
+
+    echo "$OK Installer state moved to:"
+    echo "    $local_state"
+
+fi
+
+# ===========================================================================
 # FLAKE VALIDATION
 #
-# NOW it is safe to evaluate nixosConfigurations.<host>.
+# IMPORTANT:
 #
-# At this point:
+# .local-host is intentionally Git-ignored.
 #
-#   hosts/<host>/ exists
-#   config.nix exists
-#   variables.nix exists
-#   users.nix exists
-#   packages-fonts.nix exists
-#   hardware.nix exists
-#   identity.json exists
+# Therefore:
 #
-# Therefore flake.nix's dynamic hostNames mechanism can construct the host.
+#   nix eval "$NHL_REPO_ROOT#..."
+#
+# is NOT safe here because Nix may interpret the repository as git+file and
+# omit ignored files.
+#
+# We explicitly use:
+#
+#   path:$NHL_REPO_ROOT
+#
+# which makes Nix evaluate the complete local filesystem tree, including
+# .local-host/.
 # ===========================================================================
 
 echo "-----"
@@ -475,7 +582,7 @@ echo "$NOTE Validating nixosConfigurations.$hostName..."
 
 export NIX_CONFIG=$'experimental-features = nix-command flakes\nwarn-dirty = false'
 
-flake_target="$NHL_REPO_ROOT#nixosConfigurations.\"${hostName}\""
+flake_target="path:$NHL_REPO_ROOT#nixosConfigurations.\"${hostName}\""
 
 if ! nix eval \
     --raw \
@@ -487,7 +594,7 @@ if ! nix eval \
     echo "    nixosConfigurations.${hostName}"
     echo
 
-    echo "${WARN} Host directory:"
+    echo "${WARN} Local host directory:"
     echo "    $hostDir"
     echo
 
@@ -500,18 +607,24 @@ if ! nix eval \
 
     echo "${NOTE} Current flake configurations:"
 
-    nix flake show "$NHL_REPO_ROOT" 2>&1 || true
+    nix flake show "path:$NHL_REPO_ROOT" 2>&1 || true
 
     echo
 
     echo "${ERROR} Installation cannot continue safely."
     exit 1
+
 fi
 
 echo "$OK Flake exports nixosConfigurations.$hostName."
 
 # ===========================================================================
-# STAGE GENERATED INSTALLER CHANGES
+# STAGE TRACKED INSTALLER CHANGES
+#
+# NEVER git-add .local-host/.
+#
+# The .gitignore entry itself is tracked, while machine-local configuration
+# remains private to the installation.
 # ===========================================================================
 
 echo "$NOTE Applying required Nix settings before installation"
@@ -519,9 +632,9 @@ echo "$NOTE Applying required Nix settings before installation"
 git config --global user.name "installer"
 git config --global user.email "installer@gmail.com"
 
-git add .
+git add .gitignore
 
-echo "$OK Host identity written to hosts/$hostName/identity.json"
+echo "$OK Machine-local configuration remains Git-ignored."
 
 # ===========================================================================
 # FINAL FLAKE CHECK
@@ -539,14 +652,18 @@ if ! nix eval \
     echo
     echo "${ERROR} Expected:"
     echo "    nixosConfigurations.${hostName}"
+    echo
+    echo "${WARN} Local host directory:"
+    echo "    $hostDir"
     exit 1
+
 fi
 
 echo "$OK Final flake validation passed."
 
 echo
 echo "${INFO} Rebuild target:"
-echo "    ${NHL_REPO_ROOT}#${hostName}"
+echo "    path:$NHL_REPO_ROOT#${hostName}"
 echo
 
 # ===========================================================================
@@ -568,21 +685,22 @@ echo "-----"
 printf "\n%.0s" {1..1}
 
 if ! sudo nixos-rebuild switch \
-    --flake "$NHL_REPO_ROOT#${hostName}"; then
+    --flake "path:$NHL_REPO_ROOT#${hostName}"; then
 
     echo
     echo "${ERROR} NixOS rebuild failed."
     echo
     echo "${WARN} Rebuild target:"
-    echo "    ${NHL_REPO_ROOT}#${hostName}"
+    echo "    path:$NHL_REPO_ROOT#${hostName}"
     echo
 
     echo "${NOTE} Available configurations:"
-    nix flake show "$NHL_REPO_ROOT" 2>&1 || true
+    nix flake show "path:$NHL_REPO_ROOT" 2>&1 || true
 
     echo
 
     exit 1
+
 fi
 
 echo "$OK NixOS rebuild completed successfully."
