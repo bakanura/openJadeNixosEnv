@@ -4,7 +4,7 @@
 clear
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-export NHL_REPO_ROOT="${HOME}/NixOS-Hyprland"
+export NHL_REPO_ROOT="$SCRIPT_DIR"
 
 printf "\n%.0s" {1..2}
 echo -e "\e[35m
@@ -333,41 +333,16 @@ cd || exit
 
 echo "-----"
 
-backupname=$(date "+%Y-%m-%d-%H-%M-%S")
+echo "$NOTE Using the current installer repository"
+echo "$NOTE Repository: $NHL_REPO_ROOT"
 
-if [ -d "NixOS-Hyprland" ]; then
-    echo "$NOTE NixOS-Hyprland exists, backing up to NixOS-Hyprland-backups directory."
+cd "$NHL_REPO_ROOT" || {
+    echo "$ERROR Unable to enter repository: $NHL_REPO_ROOT"
+    exit 1
+}
 
-    if [ -d "NixOS-Hyprland-backups" ]; then
-        echo "Moving current version of NixOS-Hyprland to backups directory."
-        sudo mv "$HOME/NixOS-Hyprland" \
-            "$HOME/NixOS-Hyprland-backups/$backupname"
-        sleep 1
-    else
-        echo "$NOTE Creating the backups directory & moving NixOS-Hyprland to it."
-        mkdir -p "$HOME/NixOS-Hyprland-backups"
-        sudo mv "$HOME/NixOS-Hyprland" \
-            "$HOME/NixOS-Hyprland-backups/$backupname"
-        sleep 1
-    fi
-else
-    echo "$OK Proceeding with a fresh NixOS-Hyprland setup"
-fi
-
+echo "$OK Repository ready: $NHL_REPO_ROOT"
 echo "-----"
-
-# ---------------------------------------------------------------------------
-# Clone repository.
-# ---------------------------------------------------------------------------
-echo "$NOTE Cloning and entering the NixOS-Hyprland repository"
-
-git clone --depth 1 \
-    https://github.com/LinuxBeginnings/NixOS-Hyprland.git \
-    "$HOME/NixOS-Hyprland"
-
-cd "$HOME/NixOS-Hyprland" || exit
-
-export NHL_REPO_ROOT="${HOME}/NixOS-Hyprland"
 
 if type nhl_preflight_install_repo >/dev/null 2>&1; then
     nhl_preflight_install_repo "${NHL_REPO_ROOT}" || exit 1
