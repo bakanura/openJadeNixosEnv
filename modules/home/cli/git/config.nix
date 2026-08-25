@@ -1,10 +1,10 @@
 {
-  host,
+  hostVars,
   lib,
   pkgs,
   ...
 }: let
-  inherit (import ../../../../hosts/${host}/variables.nix) gitEmail gitUsername;
+  inherit (hostVars) gitEmail gitUsername;
 
   gitBin = lib.getExe pkgs.git;
   ghBin = lib.getExe pkgs.gh;
