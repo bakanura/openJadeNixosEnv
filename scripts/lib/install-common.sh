@@ -42,6 +42,7 @@ nhl_patch_flake_identity() {
   fi
 
   mkdir -p "$(dirname "$identityFile")"
+
   cat >"$identityFile" <<EOF
 {
   "username": "$installUsername"
@@ -63,9 +64,13 @@ nhl_print_postinstall_notes() {
 }
 
 nhl_is_noninteractive() {
-  if [ "${NHL_NONINTERACTIVE:-0}" = "1" ] || [ "${INTUNE_MANAGED:-0}" = "1" ] || [ -n "${INTUNE_DEVICE_ID:-}" ] || [ ! -r /dev/tty ]; then
+  if [ "${NHL_NONINTERACTIVE:-0}" = "1" ] ||
+     [ "${INTUNE_MANAGED:-0}" = "1" ] ||
+     [ -n "${INTUNE_DEVICE_ID:-}" ] ||
+     [ ! -r /dev/tty ]; then
     return 0
   fi
+
   return 1
 }
 
@@ -81,9 +86,11 @@ nhl_read_input() {
   fi
 
   read -rp "$prompt" ans </dev/tty || true
+
   if [ -z "$ans" ]; then
     ans="$defaultValue"
   fi
+
   printf "%s\n" "$ans"
 }
 
@@ -97,9 +104,11 @@ nhl_yes_no() {
   fi
 
   read -rp "$prompt" ans </dev/tty || true
+
   if [ -z "$ans" ] || echo "$ans" | grep -qi '^y'; then
     return 0
   fi
+
   return 1
 }
 
@@ -123,6 +132,7 @@ nhl_resolve_install_username() {
   # 3. Last ditch check of current effective ID
   local current_id_name
   current_id_name=$(id -un 2>/dev/null || true)
+
   if [ -n "$current_id_name" ] && [ "$current_id_name" != "root" ]; then
     printf "%s\n" "$current_id_name"
     return 0
@@ -137,6 +147,7 @@ nhl_resolve_install_username() {
   # 5. Interactive fallback: Use the first UID 1000 user found (skipping root)
   local real_user
   real_user=$(awk -F: '$3 == 1000 {print $1}' /etc/passwd | head -n1)
+
   printf "%s\n" "${real_user:-roederp}"
 }
 
@@ -147,7 +158,8 @@ nhl_detect_host_serial() {
     serial=$(tr -d '[:space:]' </sys/class/dmi/id/product_serial 2>/dev/null || true)
   fi
 
-  if [ -z "$serial" ] && [ -r /sys/devices/virtual/dmi/id/product_serial ]; then
+  if [ -z "$serial" ] &&
+     [ -r /sys/devices/virtual/dmi/id/product_serial ]; then
     serial=$(tr -d '[:space:]' </sys/devices/virtual/dmi/id/product_serial 2>/dev/null || true)
   fi
 
@@ -162,8 +174,13 @@ nhl_sanitize_hostname() {
   local raw="$1"
   local sanitized=""
 
-  sanitized=$(printf "%s" "$raw" | tr '[:space:]' '-' | tr -cd '[:alnum:]-')
-  sanitized=$(printf "%s" "$sanitized" | sed 's/--*/-/g; s/^-//; s/-$//')
+  sanitized=$(printf "%s" "$raw" |
+    tr '[:space:]' '-' |
+    tr -cd '[:alnum:]-')
+
+  sanitized=$(printf "%s" "$sanitized" |
+    sed 's/--*/-/g; s/^-//; s/-$//')
+
   sanitized="${sanitized:0:63}"
 
   if [ -z "$sanitized" ]; then
@@ -214,17 +231,27 @@ nhl_prompt_hostname() {
 
   if nhl_is_noninteractive; then
     export NHL_SELECTED_HOSTNAME_MODE="prefix-serial"
-    export NHL_SELECTED_HOSTNAME_PREFIX="$(nhl_sanitize_hostname "${NHL_STATE_HOSTNAME_PREFIX:-$default_prefix}")"
-    export NHL_SELECTED_HOSTNAME_VALUE="$(nhl_derive_hostname "${NHL_SELECTED_HOSTNAME_PREFIX}")"
+    export NHL_SELECTED_HOSTNAME_PREFIX="$(
+      nhl_sanitize_hostname "${NHL_STATE_HOSTNAME_PREFIX:-$default_prefix}"
+    )"
+    export NHL_SELECTED_HOSTNAME_VALUE="$(
+      nhl_derive_hostname "${NHL_SELECTED_HOSTNAME_PREFIX}"
+    )"
+
     printf "%s\n" "${NHL_SELECTED_HOSTNAME_VALUE}"
     return 0
   fi
 
   while true; do
-    mode=$(nhl_read_input "Choose hostname style: [s]yntax + serial / [u]nique name (required): " "")
+    mode=$(nhl_read_input \
+      "Choose hostname style: [s]yntax + serial / [u]nique name (required): " \
+      "")
 
     if printf "%s" "$mode" | grep -qi '^[uUcC]'; then
-      custom=$(nhl_read_input "Enter the exact hostname to use (no serial will be appended): " "${NHL_STATE_HOSTNAME_VALUE:-}")
+      custom=$(nhl_read_input \
+        "Enter the exact hostname to use (no serial will be appended): " \
+        "${NHL_STATE_HOSTNAME_VALUE:-}")
+
       custom=$(nhl_sanitize_hostname "$custom")
 
       if [ -z "$custom" ] || [ "$custom" = "UNKNOWN-HOST" ]; then
@@ -234,6 +261,7 @@ nhl_prompt_hostname() {
 
       export NHL_SELECTED_HOSTNAME_MODE="custom"
       export NHL_SELECTED_HOSTNAME_VALUE="$custom"
+
       printf "%s\n" "${NHL_SELECTED_HOSTNAME_VALUE}"
       return 0
     fi
@@ -246,7 +274,10 @@ nhl_prompt_hostname() {
   done
 
   while true; do
-    prefix=$(nhl_read_input "Enter the hostname syntax/prefix to combine with this device serial (${serial_clean}): " "${NHL_STATE_HOSTNAME_PREFIX:-$default_prefix}")
+    prefix=$(nhl_read_input \
+      "Enter the hostname syntax/prefix to combine with this device serial (${serial_clean}): " \
+      "${NHL_STATE_HOSTNAME_PREFIX:-$default_prefix}")
+
     prefix=$(nhl_sanitize_hostname "$prefix")
 
     if [ -n "$prefix" ] && [ "$prefix" != "UNKNOWN-HOST" ]; then
@@ -258,7 +289,9 @@ nhl_prompt_hostname() {
 
   export NHL_SELECTED_HOSTNAME_MODE="prefix-serial"
   export NHL_SELECTED_HOSTNAME_PREFIX="$prefix"
-  export NHL_SELECTED_HOSTNAME_VALUE="$(nhl_derive_hostname "${NHL_SELECTED_HOSTNAME_PREFIX}")"
+  export NHL_SELECTED_HOSTNAME_VALUE="$(
+    nhl_derive_hostname "${NHL_SELECTED_HOSTNAME_PREFIX}"
+  )"
 
   printf "%s\n" "${NHL_SELECTED_HOSTNAME_VALUE}"
 }
@@ -267,7 +300,17 @@ nhl_preflight_install_repo() {
   local repoRoot="${1:-$(pwd)}"
   local missing=0
 
-  for path in flake.nix install.sh auto-install.sh hosts/default/config.nix hosts/default/variables.nix hosts/default/users.nix hosts/default/packages-fonts.nix hosts/default/hardware.nix scripts/lib/install-common.sh; do
+  for path in \
+    flake.nix \
+    install.sh \
+    auto-install.sh \
+    hosts/default/config.nix \
+    hosts/default/variables.nix \
+    hosts/default/users.nix \
+    hosts/default/packages-fonts.nix \
+    hosts/default/hardware.nix \
+    scripts/lib/install-common.sh; do
+
     if [ ! -e "${repoRoot}/${path}" ]; then
       echo "[ERROR] Missing required installer path: ${path}"
       missing=1
@@ -297,7 +340,8 @@ nhl_preflight_fresh_install_target() {
     return 1
   fi
 
-  if [ -d "$hostDir" ] && [ -z "$(find "$hostDir" -maxdepth 1 -type f 2>/dev/null)" ]; then
+  if [ -d "$hostDir" ] &&
+     [ -z "$(find "$hostDir" -maxdepth 1 -type f 2>/dev/null)" ]; then
     echo "[WARN] Target host directory exists but looks incomplete: $hostDir"
   fi
 
@@ -357,6 +401,7 @@ EOF
 nhl_state_file() {
   # Args: $1 = hostName
   local hostName="$1"
+
   printf "./hosts/%s/.installer-state.json\n" "$hostName"
 }
 
@@ -364,32 +409,114 @@ nhl_load_installer_state() {
   # Args: $1 = hostName
   local hostName="$1"
   local stateFile
+
   stateFile=$(nhl_state_file "$hostName")
 
-  unset NHL_STATE_GPU_PROFILE NHL_STATE_KEYBOARD_LAYOUT NHL_STATE_TIMEZONE NHL_STATE_CONSOLE_KEYMAP NHL_STATE_FINGERPRINT NHL_STATE_VSCODE_CONFIRM_SYNC NHL_STATE_HOSTNAME_MODE NHL_STATE_HOSTNAME_PREFIX NHL_STATE_HOSTNAME_VALUE
+  unset \
+    NHL_STATE_GPU_PROFILE \
+    NHL_STATE_KEYBOARD_LAYOUT \
+    NHL_STATE_TIMEZONE \
+    NHL_STATE_CONSOLE_KEYMAP \
+    NHL_STATE_FINGERPRINT \
+    NHL_STATE_VSCODE_CONFIRM_SYNC \
+    NHL_STATE_HOSTNAME_MODE \
+    NHL_STATE_HOSTNAME_PREFIX \
+    NHL_STATE_HOSTNAME_VALUE
 
   if [ ! -f "$stateFile" ]; then
     return 1
   fi
 
-  NHL_STATE_GPU_PROFILE=$(sed -n 's/.*"gpu_profile"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "$stateFile" | head -n1)
-  NHL_STATE_KEYBOARD_LAYOUT=$(sed -n 's/.*"keyboard_layout"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "$stateFile" | head -n1)
-  NHL_STATE_TIMEZONE=$(sed -n 's/.*"timezone"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "$stateFile" | head -n1)
-  NHL_STATE_CONSOLE_KEYMAP=$(sed -n 's/.*"console_keymap"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "$stateFile" | head -n1)
-  NHL_STATE_FINGERPRINT=$(sed -n 's/.*"fingerprint_enabled"[[:space:]]*:[[:space:]]*\(true\|false\).*/\1/p' "$stateFile" | head -n1)
-  NHL_STATE_VSCODE_CONFIRM_SYNC=$(sed -n 's/.*"vscode_confirm_sync"[[:space:]]*:[[:space:]]*\(true\|false\).*/\1/p' "$stateFile" | head -n1)
-  NHL_STATE_HOSTNAME_MODE=$(sed -n 's/.*"hostname_mode"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "$stateFile" | head -n1)
-  NHL_STATE_HOSTNAME_PREFIX=$(sed -n 's/.*"hostname_prefix"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "$stateFile" | head -n1)
-  NHL_STATE_HOSTNAME_VALUE=$(sed -n 's/.*"hostname_value"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "$stateFile" | head -n1)
+  NHL_STATE_GPU_PROFILE=$(
+    sed -n \
+      's/.*"gpu_profile"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' \
+      "$stateFile" |
+      head -n1
+  )
 
-  export NHL_STATE_GPU_PROFILE NHL_STATE_KEYBOARD_LAYOUT NHL_STATE_TIMEZONE NHL_STATE_CONSOLE_KEYMAP NHL_STATE_FINGERPRINT NHL_STATE_VSCODE_CONFIRM_SYNC NHL_STATE_HOSTNAME_MODE NHL_STATE_HOSTNAME_PREFIX NHL_STATE_HOSTNAME_VALUE
+  NHL_STATE_KEYBOARD_LAYOUT=$(
+    sed -n \
+      's/.*"keyboard_layout"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' \
+      "$stateFile" |
+      head -n1
+  )
+
+  NHL_STATE_TIMEZONE=$(
+    sed -n \
+      's/.*"timezone"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' \
+      "$stateFile" |
+      head -n1
+  )
+
+  NHL_STATE_CONSOLE_KEYMAP=$(
+    sed -n \
+      's/.*"console_keymap"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' \
+      "$stateFile" |
+      head -n1
+  )
+
+  NHL_STATE_FINGERPRINT=$(
+    sed -n \
+      's/.*"fingerprint_enabled"[[:space:]]*:[[:space:]]*\(true\|false\).*/\1/p' \
+      "$stateFile" |
+      head -n1
+  )
+
+  NHL_STATE_VSCODE_CONFIRM_SYNC=$(
+    sed -n \
+      's/.*"vscode_confirm_sync"[[:space:]]*:[[:space:]]*\(true\|false\).*/\1/p' \
+      "$stateFile" |
+      head -n1
+  )
+
+  NHL_STATE_HOSTNAME_MODE=$(
+    sed -n \
+      's/.*"hostname_mode"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' \
+      "$stateFile" |
+      head -n1
+  )
+
+  NHL_STATE_HOSTNAME_PREFIX=$(
+    sed -n \
+      's/.*"hostname_prefix"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' \
+      "$stateFile" |
+      head -n1
+  )
+
+  NHL_STATE_HOSTNAME_VALUE=$(
+    sed -n \
+      's/.*"hostname_value"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' \
+      "$stateFile" |
+      head -n1
+  )
+
+  export \
+    NHL_STATE_GPU_PROFILE \
+    NHL_STATE_KEYBOARD_LAYOUT \
+    NHL_STATE_TIMEZONE \
+    NHL_STATE_CONSOLE_KEYMAP \
+    NHL_STATE_FINGERPRINT \
+    NHL_STATE_VSCODE_CONFIRM_SYNC \
+    NHL_STATE_HOSTNAME_MODE \
+    NHL_STATE_HOSTNAME_PREFIX \
+    NHL_STATE_HOSTNAME_VALUE
+
   return 0
 }
 
 nhl_save_installer_state() {
-  # Args: $1 hostName, $2 keyboard, $3 timezone, $4 console keymap,
-  # $5 fingerprint(0/1), $6 gpu profile, $7 vscode confirm sync(true/false),
-  # $8 hostname mode, $9 hostname prefix, $10 hostname value
+  # Args:
+  # $1 hostName
+  # $2 keyboard
+  # $3 timezone
+  # $4 console keymap
+  # $5 fingerprint(0/1)
+  # $6 gpu profile
+  # $7 vscode confirm sync(true/false)
+  # $8 hostname mode
+  # $9 hostname prefix
+  # $10 hostname value
+
   local hostName="$1"
   local keyboardLayout="$2"
   local timeZone="$3"
@@ -404,9 +531,11 @@ nhl_save_installer_state() {
   local fpJson="false"
 
   stateFile=$(nhl_state_file "$hostName")
+
   mkdir -p "./hosts/$hostName"
 
-  if [ "$fingerprintEnabled" = "1" ] || [ "$fingerprintEnabled" = "true" ]; then
+  if [ "$fingerprintEnabled" = "1" ] ||
+     [ "$fingerprintEnabled" = "true" ]; then
     fpJson="true"
   fi
 
@@ -431,6 +560,7 @@ nhl_detect_gpu_and_toggle() {
   # Args: $1 = hostName
   local hostName="$1"
   local cfg="./hosts/$hostName/config.nix"
+
   [ -f "$cfg" ] || cfg="./hosts/default/config.nix"
 
   local has_vm=false
@@ -454,7 +584,7 @@ nhl_detect_gpu_and_toggle() {
     done < <(lspci | grep -iE '(VGA|3D)')
   fi
 
-  # Decide detected profile
+  # Decide detected profile.
   local detected=""
 
   if $has_vm; then
@@ -469,7 +599,7 @@ nhl_detect_gpu_and_toggle() {
     detected="intel"
   fi
 
-  # Confirm or manually choose profile
+  # Confirm or manually choose profile.
   local profile="$detected"
 
   if [ -n "$detected" ]; then
@@ -480,40 +610,153 @@ nhl_detect_gpu_and_toggle() {
 
   if [ -z "$profile" ]; then
     local default_profile="${NHL_STATE_GPU_PROFILE:-amd}"
-    profile=$(nhl_read_input "Enter your GPU profile (amd|intel|nvidia|nvidia-laptop|vm): [${default_profile}] " "$default_profile")
+
+    profile=$(nhl_read_input \
+      "Enter your GPU profile (amd|intel|nvidia|nvidia-laptop|vm): [${default_profile}] " \
+      "$default_profile")
   fi
 
-  # Reset toggles
-  sed -i 's/drivers\.amdgpu\.enable = [^;]*;/drivers.amdgpu.enable = false;/' "$cfg" || true
-  sed -i 's/drivers\.intel\.enable = [^;]*;/drivers.intel.enable = false;/' "$cfg" || true
-  sed -i 's/drivers\.nvidia\.enable = [^;]*;/drivers.nvidia.enable = false;/' "$cfg" || true
-  sed -i 's/drivers\.nvidia-prime\.enable = [^;]*;/drivers.nvidia-prime.enable = false;/' "$cfg" || true
-  sed -i 's/vm\.guest-services\.enable = [^;]*;/vm.guest-services.enable = false;/' "$cfg" || true
+  # Reset toggles.
+  sed -i \
+    's/drivers\.amdgpu\.enable = [^;]*;/drivers.amdgpu.enable = false;/' \
+    "$cfg" || true
 
-  # Apply selected profile
+  sed -i \
+    's/drivers\.intel\.enable = [^;]*;/drivers.intel.enable = false;/' \
+    "$cfg" || true
+
+  sed -i \
+    's/drivers\.nvidia\.enable = [^;]*;/drivers.nvidia.enable = false;/' \
+    "$cfg" || true
+
+  sed -i \
+    's/drivers\.nvidia-prime\.enable = [^;]*;/drivers.nvidia-prime.enable = false;/' \
+    "$cfg" || true
+
+  sed -i \
+    's/vm\.guest-services\.enable = [^;]*;/vm.guest-services.enable = false;/' \
+    "$cfg" || true
+
+  # Apply selected profile.
   case "$profile" in
     vm)
-      sed -i 's/vm\.guest-services\.enable = [^;]*;/vm.guest-services.enable = true;/' "$cfg" || true
+      sed -i \
+        's/vm\.guest-services\.enable = [^;]*;/vm.guest-services.enable = true;/' \
+        "$cfg" || true
       ;;
+
     nvidia-laptop)
-      sed -i 's/drivers\.nvidia-prime\.enable = [^;]*;/drivers.nvidia-prime.enable = true;/' "$cfg" || true
-      sed -i 's/drivers\.intel\.enable = [^;]*;/drivers.intel.enable = true;/' "$cfg" || true
+      sed -i \
+        's/drivers\.nvidia-prime\.enable = [^;]*;/drivers.nvidia-prime.enable = true;/' \
+        "$cfg" || true
+
+      sed -i \
+        's/drivers\.intel\.enable = [^;]*;/drivers.intel.enable = true;/' \
+        "$cfg" || true
       ;;
+
     nvidia)
-      sed -i 's/drivers\.nvidia\.enable = [^;]*;/drivers.nvidia.enable = true;/' "$cfg" || true
+      sed -i \
+        's/drivers\.nvidia\.enable = [^;]*;/drivers.nvidia.enable = true;/' \
+        "$cfg" || true
       ;;
+
     amd)
-      sed -i 's/drivers\.amdgpu\.enable = [^;]*;/drivers.amdgpu.enable = true;/' "$cfg" || true
+      sed -i \
+        's/drivers\.amdgpu\.enable = [^;]*;/drivers.amdgpu.enable = true;/' \
+        "$cfg" || true
       ;;
+
     intel)
-      sed -i 's/drivers\.intel\.enable = [^;]*;/drivers.intel.enable = true;/' "$cfg" || true
+      sed -i \
+        's/drivers\.intel\.enable = [^;]*;/drivers.intel.enable = true;/' \
+        "$cfg" || true
       ;;
+
     *)
-      # Fallback: do nothing if unknown
+      # Fallback: do nothing if unknown.
       ;;
   esac
 
   export NHL_GPU_PROFILE="$profile"
+}
+
+# Safely apply a sed transformation to a file.
+#
+# This deliberately does NOT use:
+#
+#   sudo sed -i ...
+#
+# directly on /etc/nixos/configuration.nix.
+#
+# sed -i needs to create a temporary file next to the target, which can
+# fail with errors such as:
+#
+#   couldn't open temporary file /etc/nixos/sedXXXXXX
+#
+# This helper instead:
+#
+#   1. Creates the temporary file in /tmp.
+#   2. Runs sed against the original file.
+#   3. Installs the result back with sudo.
+#
+# Args:
+#   $1 = file
+#   $2... = sed arguments
+nhl_sed_file() {
+  local file="$1"
+  shift
+
+  if [ ! -f "$file" ]; then
+    echo "[ERROR] Cannot modify missing file: $file"
+    return 1
+  fi
+
+  local tmp=""
+  local mode=""
+  local owner=""
+  local group=""
+
+  tmp=$(mktemp "${TMPDIR:-/tmp}/nhl-sed.XXXXXX") || {
+    echo "[ERROR] Could not create temporary file for: $file"
+    return 1
+  }
+
+  # Preserve the existing mode/ownership where possible.
+  mode=$(stat -c '%a' "$file" 2>/dev/null || true)
+  owner=$(stat -c '%u' "$file" 2>/dev/null || true)
+  group=$(stat -c '%g' "$file" 2>/dev/null || true)
+
+  if ! sed "$@" "$file" >"$tmp"; then
+    rm -f "$tmp"
+    echo "[ERROR] Failed to transform: $file"
+    return 1
+  fi
+
+  if [ -w "$file" ]; then
+    if ! cat "$tmp" >"$file"; then
+      rm -f "$tmp"
+      echo "[ERROR] Failed to write modified file: $file"
+      return 1
+    fi
+
+    if [ -n "$mode" ]; then
+      chmod "$mode" "$file" 2>/dev/null || true
+    fi
+  else
+    if ! sudo install -m "${mode:-644}" "$tmp" "$file"; then
+      rm -f "$tmp"
+      echo "[ERROR] sudo could not install modified file: $file"
+      return 1
+    fi
+
+    if [ -n "$owner" ] && [ -n "$group" ]; then
+      sudo chown "${owner}:${group}" "$file" 2>/dev/null || true
+    fi
+  fi
+
+  rm -f "$tmp"
+  return 0
 }
 
 nhl_insert_option_before_closing_brace() {
@@ -538,13 +781,60 @@ nhl_insert_option_before_closing_brace() {
     return 1
   fi
 
-  # /etc/nixos/configuration.nix is normally root-owned.
-  # Use sudo when the current user cannot write the file.
-  if [ -w "$file" ]; then
-    sed -i "${last_brace_line}i\\  ${line}" "$file"
-  else
-    sudo sed -i "${last_brace_line}i\\  ${line}" "$file"
+  # Do not use sed -i directly on /etc/nixos files.
+  # Build the result in /tmp and install it back safely.
+  local tmp=""
+  local mode=""
+  local owner=""
+  local group=""
+
+  tmp=$(mktemp "${TMPDIR:-/tmp}/nhl-insert.XXXXXX") || {
+    echo "[ERROR] Could not create temporary file for: $file"
+    return 1
+  }
+
+  mode=$(stat -c '%a' "$file" 2>/dev/null || true)
+  owner=$(stat -c '%u' "$file" 2>/dev/null || true)
+  group=$(stat -c '%g' "$file" 2>/dev/null || true)
+
+  if ! awk \
+    -v insert_line="$last_brace_line" \
+    -v new_line="$line" '
+      NR == insert_line {
+        print "  " new_line
+      }
+      { print }
+    ' "$file" >"$tmp"; then
+
+    rm -f "$tmp"
+    echo "[ERROR] Failed to insert option into: $file"
+    return 1
   fi
+
+  if [ -w "$file" ]; then
+    if ! cat "$tmp" >"$file"; then
+      rm -f "$tmp"
+      echo "[ERROR] Failed to write modified file: $file"
+      return 1
+    fi
+
+    if [ -n "$mode" ]; then
+      chmod "$mode" "$file" 2>/dev/null || true
+    fi
+  else
+    if ! sudo install -m "${mode:-644}" "$tmp" "$file"; then
+      rm -f "$tmp"
+      echo "[ERROR] sudo could not install modified file: $file"
+      return 1
+    fi
+
+    if [ -n "$owner" ] && [ -n "$group" ]; then
+      sudo chown "${owner}:${group}" "$file" 2>/dev/null || true
+    fi
+  fi
+
+  rm -f "$tmp"
+  return 0
 }
 
 nhl_lookup_timezone_from_city() {
@@ -554,18 +844,23 @@ nhl_lookup_timezone_from_city() {
   local resp=""
   local tz=""
 
-  if [ -z "$city" ] || ! command -v curl >/dev/null 2>&1; then
+  if [ -z "$city" ] ||
+     ! command -v curl >/dev/null 2>&1; then
     return 1
   fi
 
   # Minimal URL encoding for common city input.
-  encoded=$(printf "%s" "$city" | sed -e 's/%/%25/g' -e 's/ /%20/g')
+  encoded=$(printf "%s" "$city" |
+    sed -e 's/%/%25/g' -e 's/ /%20/g')
 
   resp=$(curl -fsSL --max-time 10 \
     "https://geocoding-api.open-meteo.com/v1/search?name=${encoded}&count=1&language=en&format=json" \
     2>/dev/null || true)
 
-  tz=$(echo "$resp" | tr -d '\n' | sed -n 's/.*"timezone":"\([^"]*\)".*/\1/p' | head -n1)
+  tz=$(echo "$resp" |
+    tr -d '\n' |
+    sed -n 's/.*"timezone":"\([^"]*\)".*/\1/p' |
+    head -n1)
 
   if [ -n "$tz" ] && echo "$tz" | grep -q '/'; then
     printf "%s\n" "$tz"
@@ -582,14 +877,21 @@ nhl_detect_timezone_auto() {
   if command -v timedatectl >/dev/null 2>&1; then
     tz=$(timedatectl show -p Timezone --value 2>/dev/null || true)
 
-    if [ -n "$tz" ] && [ "$tz" != "n/a" ] && [ "$tz" != "UTC" ] && echo "$tz" | grep -q '/'; then
+    if [ -n "$tz" ] &&
+       [ "$tz" != "n/a" ] &&
+       [ "$tz" != "UTC" ] &&
+       echo "$tz" | grep -q '/'; then
+
       printf "%s\n" "$tz"
       return 0
     fi
   fi
 
   if command -v curl >/dev/null 2>&1; then
-    tz=$(curl -fsSL --max-time 8 https://ipapi.co/timezone 2>/dev/null | tr -d '[:space:]' || true)
+    tz=$(curl -fsSL --max-time 8 \
+      https://ipapi.co/timezone \
+      2>/dev/null |
+      tr -d '[:space:]' || true)
 
     if [ -n "$tz" ] && echo "$tz" | grep -q '/'; then
       printf "%s\n" "$tz"
@@ -605,6 +907,7 @@ nhl_prompt_timezone_console() {
   local hostName="$1"
   local defKb="${2:-us}"
   local cfg="./hosts/$hostName/config.nix"
+
   [ -f "$cfg" ] || cfg="./hosts/default/config.nix"
 
   local timeZone=""
@@ -617,7 +920,9 @@ nhl_prompt_timezone_console() {
   elif timeZone=$(nhl_detect_timezone_auto); then
     echo "${OK} Detected timezone automatically: ${timeZone}"
   else
-    city=$(nhl_read_input "Could not auto-detect timezone. Enter your current city (e.g. Mannheim): " "")
+    city=$(nhl_read_input \
+      "Could not auto-detect timezone. Enter your current city (e.g. Mannheim): " \
+      "")
 
     if [ -n "$city" ]; then
       timeZone=$(nhl_lookup_timezone_from_city "$city" || true)
@@ -629,42 +934,63 @@ nhl_prompt_timezone_console() {
   fi
 
   if [ -z "$timeZone" ]; then
-    manualTz=$(nhl_read_input "Enter your timezone manually (e.g. Europe/Berlin), or leave blank for automatic service: [auto] " "")
+    manualTz=$(nhl_read_input \
+      "Enter your timezone manually (e.g. Europe/Berlin), or leave blank for automatic service: [auto] " \
+      "")
+
     timeZone="$manualTz"
   fi
 
   if [ -n "$timeZone" ]; then
     # Set explicit timezone and disable automatic.
     if grep -q 'time\.timeZone' "$cfg"; then
-      sed -i "s|time\.timeZone = \".*\";|time.timeZone = \"$timeZone\";|" "$cfg" || true
+      nhl_sed_file \
+        "$cfg" \
+        -e "s|time\.timeZone = \".*\";|time.timeZone = \"$timeZone\";|" || true
     else
-      nhl_insert_option_before_closing_brace "$cfg" "time.timeZone = \"$timeZone\";"
+      nhl_insert_option_before_closing_brace \
+        "$cfg" \
+        "time.timeZone = \"$timeZone\";"
     fi
 
     if grep -q 'services\.automatic-timezoned\.enable' "$cfg"; then
-      sed -i 's/services\.automatic-timezoned\.enable = [^;]*/services.automatic-timezoned.enable = false/' "$cfg" || true
+      nhl_sed_file \
+        "$cfg" \
+        -e 's/services\.automatic-timezoned\.enable = [^;]*/services.automatic-timezoned.enable = false/' || true
     else
-      nhl_insert_option_before_closing_brace "$cfg" "services.automatic-timezoned.enable = false;"
+      nhl_insert_option_before_closing_brace \
+        "$cfg" \
+        "services.automatic-timezoned.enable = false;"
     fi
   else
     # Prefer automatic time zone if still unknown.
     if grep -q 'services\.automatic-timezoned\.enable' "$cfg"; then
-      sed -i 's/services.automatic-timezoned.enable = [^;]*/services.automatic-timezoned.enable = true/' "$cfg" || true
+      nhl_sed_file \
+        "$cfg" \
+        -e 's/services.automatic-timezoned.enable = [^;]*/services.automatic-timezoned.enable = true/' || true
     else
-      nhl_insert_option_before_closing_brace "$cfg" "services.automatic-timezoned.enable = true;"
+      nhl_insert_option_before_closing_brace \
+        "$cfg" \
+        "services.automatic-timezoned.enable = true;"
     fi
 
     # Remove explicit time.timeZone if present.
-    sed -i '/time\.timeZone[[:space:]]*=/{d}' "$cfg" || true
+    nhl_sed_file \
+      "$cfg" \
+      -e '/time\.timeZone[[:space:]]*=/{d}' || true
   fi
 
   # Console keymap follows chosen keyboard layout by default.
   local consoleKeyMap="${NHL_STATE_CONSOLE_KEYMAP:-$defKb}"
 
   if grep -q 'console\.keyMap' "$cfg"; then
-    sed -i "s|console\.keyMap = \".*\";|console.keyMap = \"$consoleKeyMap\";|" "$cfg" || true
+    nhl_sed_file \
+      "$cfg" \
+      -e "s|console\.keyMap = \".*\";|console.keyMap = \"$consoleKeyMap\";|" || true
   else
-    nhl_insert_option_before_closing_brace "$cfg" "console.keyMap = \"$consoleKeyMap\";"
+    nhl_insert_option_before_closing_brace \
+      "$cfg" \
+      "console.keyMap = \"$consoleKeyMap\";"
   fi
 
   export NHL_SELECTED_TIMEZONE="$timeZone"
@@ -677,12 +1003,17 @@ nhl_check_go_version() {
   local go_version=""
 
   if command -v nix >/dev/null 2>&1; then
-    nix_go_version=$(NIX_CONFIG="experimental-features = nix-command flakes" \
-      nix eval --raw "nixpkgs#go.version" 2>/dev/null || true)
+    nix_go_version=$(
+      NIX_CONFIG="experimental-features = nix-command flakes" \
+        nix eval --raw "nixpkgs#go.version" 2>/dev/null || true
+    )
   fi
 
   if [ -n "$nix_go_version" ]; then
-    if [ "$(printf '%s\n' "$min_version" "$nix_go_version" | sort -V | head -n1)" != "$min_version" ]; then
+    if [ "$(printf '%s\n' "$min_version" "$nix_go_version" |
+      sort -V |
+      head -n1)" != "$min_version" ]; then
+
       echo "${ERROR} Go in nixpkgs is ${nix_go_version}, but ${min_version} or greater is required."
       exit 1
     fi
@@ -692,9 +1023,15 @@ nhl_check_go_version() {
   fi
 
   if command -v go >/dev/null 2>&1; then
-    go_version=$(go version | awk '{print $3}' | sed 's/^go//')
+    go_version=$(go version |
+      awk '{print $3}' |
+      sed 's/^go//')
 
-    if [ -n "$go_version" ] && [ "$(printf '%s\n' "$min_version" "$go_version" | sort -V | head -n1)" = "$min_version" ]; then
+    if [ -n "$go_version" ] &&
+       [ "$(printf '%s\n' "$min_version" "$go_version" |
+         sort -V |
+         head -n1)" = "$min_version" ]; then
+
       echo "${OK} Go is ${go_version} (>= ${min_version})."
       return 0
     fi
@@ -713,7 +1050,7 @@ nhl_ensure_required_packages() {
   local cmd
   local pkg
   local fwupd_configured=false
-  local fwupd_needs_service=false
+  local fwupd_functional=false
 
   # command -> NixOS package
   declare -A packages=(
@@ -734,24 +1071,47 @@ nhl_ensure_required_packages() {
     fi
   done
 
-  # fwupdmgr requires the fwupd system service, not just the binary.
-  if grep -qE 'services\.fwupd\.enable[[:space:]]*=[[:space:]]*true[[:space:]]*;' "$config" 2>/dev/null; then
+  # ------------------------------------------------------------
+  # Check NixOS fwupd configuration.
+  # ------------------------------------------------------------
+  #
+  # IMPORTANT:
+  #
+  # fwupd.service does not need to remain continuously active.
+  # fwupd can be activated on demand through the system service/D-Bus.
+  #
+  # Therefore:
+  #
+  #   systemctl is-active fwupd.service
+  #
+  # is NOT a valid requirement by itself.
+  #
+  # The real test is whether fwupdmgr can communicate with fwupd.
+  # ------------------------------------------------------------
+  if grep -qE \
+    'services\.fwupd\.enable[[:space:]]*=[[:space:]]*true[[:space:]]*;' \
+    "$config" 2>/dev/null; then
+
     fwupd_configured=true
   fi
 
   if command -v fwupdmgr >/dev/null 2>&1; then
-    if ! systemctl is-active --quiet fwupd.service 2>/dev/null; then
-      echo "[WARN] fwupd is installed but fwupd.service is not running."
-      fwupd_needs_service=true
+    echo "[ACTION] Testing fwupd daemon connectivity..."
+
+    if sudo fwupdmgr get-devices >/dev/null 2>&1; then
+      fwupd_functional=true
+      echo "[OK] fwupdmgr can communicate with fwupd."
     else
-      echo "[OK] fwupd daemon is running."
+      echo "[WARN] fwupdmgr could not communicate with fwupd."
     fi
   fi
 
+  # All commands plus functional fwupd are good.
   if [ "${#missing[@]}" -eq 0 ] &&
      [ "$fwupd_configured" = true ] &&
-     [ "$fwupd_needs_service" = false ]; then
-    echo "[OK] All required packages and services are available."
+     [ "$fwupd_functional" = true ]; then
+
+    echo "[OK] All required packages and fwupd are available."
     return 0
   fi
 
@@ -767,13 +1127,15 @@ nhl_ensure_required_packages() {
     echo "  - services.fwupd.enable = true"
   fi
 
-  if [ "$fwupd_needs_service" = true ]; then
-    echo "  - fwupd.service"
+  if [ "$fwupd_functional" = false ] &&
+     command -v fwupdmgr >/dev/null 2>&1; then
+    echo "  - fwupd daemon connectivity"
   fi
 
   echo
 
   local choice=""
+
   choice=$(nhl_read_input \
     "Add/fix required packages and fwupd in NixOS, then rebuild? [Y/n/c=continue] " \
     "y")
@@ -783,6 +1145,7 @@ nhl_ensure_required_packages() {
       echo "[NOTE] Continuing without fixing missing requirements."
       return 0
       ;;
+
     n|no)
       echo "[NOTE] Skipping required package/service setup."
       return 0
@@ -810,10 +1173,61 @@ EOF
     fi
 
     for pkg in "${missing[@]}"; do
-      if ! grep -qE "^[[:space:]]*${pkg}[[:space:]]*$" "$config"; then
-        sudo sed -i \
-          "/environment\.systemPackages = with pkgs; \[/a\\    ${pkg}" \
-          "$config"
+      if ! grep -qE \
+        "^[[:space:]]*${pkg}[[:space:]]*$" \
+        "$config"; then
+
+        # Do not use sed -i directly against /etc/nixos.
+        local tmp=""
+        local mode=""
+        local owner=""
+        local group=""
+
+        tmp=$(mktemp "${TMPDIR:-/tmp}/nhl-package.XXXXXX") || {
+          echo "[ERROR] Could not create temporary file for package insertion."
+          return 1
+        }
+
+        mode=$(stat -c '%a' "$config" 2>/dev/null || echo 644)
+        owner=$(stat -c '%u' "$config" 2>/dev/null || true)
+        group=$(stat -c '%g' "$config" 2>/dev/null || true)
+
+        if ! awk \
+          -v new_pkg="$pkg" '
+            /environment\.systemPackages = with pkgs; \[/ {
+              print
+              print "    " new_pkg
+              next
+            }
+            { print }
+          ' "$config" >"$tmp"; then
+
+          rm -f "$tmp"
+          echo "[ERROR] Failed to add package $pkg."
+          return 1
+        fi
+
+        if [ -w "$config" ]; then
+          if ! cat "$tmp" >"$config"; then
+            rm -f "$tmp"
+            echo "[ERROR] Failed to write $config."
+            return 1
+          fi
+
+          chmod "$mode" "$config" 2>/dev/null || true
+        else
+          if ! sudo install -m "$mode" "$tmp" "$config"; then
+            rm -f "$tmp"
+            echo "[ERROR] sudo could not update $config."
+            return 1
+          fi
+
+          if [ -n "$owner" ] && [ -n "$group" ]; then
+            sudo chown "${owner}:${group}" "$config" 2>/dev/null || true
+          fi
+        fi
+
+        rm -f "$tmp"
 
         echo "[OK] Added $pkg."
       else
@@ -829,15 +1243,19 @@ EOF
     echo "[ACTION] Enabling fwupd service..."
 
     if grep -q 'services\.fwupd\.enable' "$config"; then
-      sudo sed -i \
-        's/services\.fwupd\.enable[[:space:]]*=[[:space:]]*[^;]*;/services.fwupd.enable = true;/' \
-        "$config"
+      nhl_sed_file \
+        "$config" \
+        -e 's/services\.fwupd\.enable[[:space:]]*=[[:space:]]*[^;]*;/services.fwupd.enable = true;/' || {
+          echo "[ERROR] Failed to update services.fwupd.enable."
+          return 1
+        }
     else
-      # Use the shared helper so the option is inserted BEFORE
-      # the final closing } instead of being appended after it.
       nhl_insert_option_before_closing_brace \
         "$config" \
-        "services.fwupd.enable = true;"
+        "services.fwupd.enable = true;" || {
+          echo "[ERROR] Failed to insert services.fwupd.enable."
+          return 1
+        }
     fi
 
     echo "[OK] Added services.fwupd.enable = true."
@@ -864,23 +1282,38 @@ EOF
   done
 
   # ------------------------------------------------------------
-  # Verify fwupd daemon after rebuild.
+  # Verify fwupd AFTER rebuild.
   # ------------------------------------------------------------
-  if ! systemctl is-active --quiet fwupd.service 2>/dev/null; then
-    echo "[ERROR] fwupd.service is still not running after the rebuild."
-    echo "[ERROR] fwupdmgr cannot communicate with the fwupd daemon."
+  #
+  # Do NOT require:
+  #
+  #   systemctl is-active fwupd.service
+  #
+  # because fwupd may be inactive/dead when idle and still be
+  # completely functional through activation when fwupdmgr asks
+  # for the daemon.
+  #
+  # Instead, ask fwupdmgr to enumerate devices.
+  # ------------------------------------------------------------
+  echo "[ACTION] Verifying fwupd daemon connectivity..."
+
+  if sudo fwupdmgr get-devices >/dev/null 2>&1; then
+    echo "[OK] fwupdmgr can communicate with the fwupd daemon."
+  else
+    echo "[ERROR] fwupdmgr could not communicate with the fwupd daemon after the rebuild."
+    echo "[ERROR] Check: sudo systemctl status fwupd.service"
+    echo "[ERROR] Check: sudo journalctl -u fwupd.service -b --no-pager"
     return 1
   fi
 
-  echo "[OK] fwupd daemon is running."
-  echo "[OK] All required packages and services are installed and available."
+  echo "[OK] All required packages and fwupd are installed and functional."
 }
-
 
 nhl_prompt_fingerprint() {
   # Args: $1 = hostName
   local hostName="$1"
   local cfg="./hosts/$hostName/config.nix"
+
   [ -f "$cfg" ] || cfg="./hosts/default/config.nix"
 
   local enable_fp
@@ -892,22 +1325,34 @@ nhl_prompt_fingerprint() {
     default_value="y"
   fi
 
-  enable_fp=$(nhl_read_input "Enable fingerprint login (fprintd) for ly/login? ${default_prompt}: " "$default_value")
+  enable_fp=$(
+    nhl_read_input \
+      "Enable fingerprint login (fprintd) for ly/login? ${default_prompt}: " \
+      "$default_value"
+  )
 
   if echo "${enable_fp:-n}" | grep -qi '^y'; then
     if grep -q 'local\.security\.fingerprint\.enable' "$cfg"; then
-      sed -i 's/local\.security\.fingerprint\.enable = [^;]*;/local.security.fingerprint.enable = true;/' "$cfg" || true
+      nhl_sed_file \
+        "$cfg" \
+        -e 's/local\.security\.fingerprint\.enable = [^;]*;/local.security.fingerprint.enable = true;/' || true
     else
-      nhl_insert_option_before_closing_brace "$cfg" "local.security.fingerprint.enable = true;"
+      nhl_insert_option_before_closing_brace \
+        "$cfg" \
+        "local.security.fingerprint.enable = true;"
     fi
 
     export NHL_ENABLE_FINGERPRINT=1
     echo "${OK} Fingerprint login enabled in host config."
   else
     if grep -q 'local\.security\.fingerprint\.enable' "$cfg"; then
-      sed -i 's/local\.security\.fingerprint\.enable = [^;]*;/local.security.fingerprint.enable = false;/' "$cfg" || true
+      nhl_sed_file \
+        "$cfg" \
+        -e 's/local\.security\.fingerprint\.enable = [^;]*;/local.security.fingerprint.enable = false;/' || true
     else
-      nhl_insert_option_before_closing_brace "$cfg" "local.security.fingerprint.enable = false;"
+      nhl_insert_option_before_closing_brace \
+        "$cfg" \
+        "local.security.fingerprint.enable = false;"
     fi
 
     export NHL_ENABLE_FINGERPRINT=0
@@ -919,6 +1364,7 @@ nhl_prompt_vscode_confirm_sync() {
   # Args: $1 = hostName
   local hostName="$1"
   local vars="./hosts/$hostName/variables.nix"
+
   [ -f "$vars" ] || vars="./hosts/default/variables.nix"
 
   local default_prompt="(y/N)"
@@ -930,22 +1376,35 @@ nhl_prompt_vscode_confirm_sync() {
   fi
 
   local always_sync
-  always_sync=$(nhl_read_input "Want VS Code to always sync when committing? ${default_prompt}: " "$default_value")
+
+  always_sync=$(
+    nhl_read_input \
+      "Want VS Code to always sync when committing? ${default_prompt}: " \
+      "$default_value"
+  )
 
   if echo "${always_sync:-n}" | grep -qi '^y'; then
     if grep -q 'vscodeGitConfirmSync' "$vars"; then
-      sed -i 's/vscodeGitConfirmSync = [^;]*;/vscodeGitConfirmSync = false;/' "$vars" || true
+      nhl_sed_file \
+        "$vars" \
+        -e 's/vscodeGitConfirmSync = [^;]*;/vscodeGitConfirmSync = false;/' || true
     else
-      nhl_insert_option_before_closing_brace "$vars" "vscodeGitConfirmSync = false; # false skips the VS Code sync confirmation prompt."
+      nhl_insert_option_before_closing_brace \
+        "$vars" \
+        "vscodeGitConfirmSync = false; # false skips the VS Code sync confirmation prompt."
     fi
 
     export NHL_VSCODE_CONFIRM_SYNC=false
     echo "${OK} VS Code sync confirmation disabled."
   else
     if grep -q 'vscodeGitConfirmSync' "$vars"; then
-      sed -i 's/vscodeGitConfirmSync = [^;]*;/vscodeGitConfirmSync = true;/' "$vars" || true
+      nhl_sed_file \
+        "$vars" \
+        -e 's/vscodeGitConfirmSync = [^;]*;/vscodeGitConfirmSync = true;/' || true
     else
-      nhl_insert_option_before_closing_brace "$vars" "vscodeGitConfirmSync = true; # true keeps the VS Code sync confirmation prompt."
+      nhl_insert_option_before_closing_brace \
+        "$vars" \
+        "vscodeGitConfirmSync = true; # true keeps the VS Code sync confirmation prompt."
     fi
 
     export NHL_VSCODE_CONFIRM_SYNC=true
@@ -989,7 +1448,9 @@ nhl_enroll_fingerprint() {
 nhl_prompt_firmware_updates() {
   # Optional pre-install firmware inspection/update helper.
   # Package/service setup is handled centrally by nhl_ensure_required_packages.
-  if ! nhl_yes_no "Check firmware updates with fwupd before continuing? (y/N): "; then
+
+  if ! nhl_yes_no \
+    "Check firmware updates with fwupd before continuing? (y/N): "; then
     return 0
   fi
 
@@ -999,11 +1460,21 @@ nhl_prompt_firmware_updates() {
     return 0
   fi
 
-  if ! systemctl is-active --quiet fwupd.service 2>/dev/null; then
-    echo "${WARN} fwupd.service is not running."
-    echo "${NOTE} Firmware inspection cannot continue without the fwupd daemon."
+  # ------------------------------------------------------------
+  # Do NOT require fwupd.service to be active here.
+  #
+  # fwupd can be socket/D-Bus activated. An inactive/dead service
+  # while idle is normal. The real test is whether fwupdmgr works.
+  # ------------------------------------------------------------
+  echo "${INFO} Testing fwupd daemon connectivity..."
+
+  if ! sudo fwupdmgr get-devices >/dev/null 2>&1; then
+    echo "${WARN} fwupdmgr could not communicate with the fwupd daemon."
+    echo "${NOTE} Firmware inspection cannot continue."
     return 0
   fi
+
+  echo "${OK} fwupdmgr successfully connected to fwupd."
 
   echo "${INFO} Refreshing firmware metadata..."
   sudo fwupdmgr refresh --force || true
@@ -1014,7 +1485,10 @@ nhl_prompt_firmware_updates() {
   echo "${INFO} Checking for available firmware updates..."
 
   local updates_output=""
-  updates_output=$(sudo fwupdmgr get-updates 2>&1 || true)
+
+  updates_output=$(
+    sudo fwupdmgr get-updates 2>&1 || true
+  )
 
   printf "%s\n" "$updates_output"
 
@@ -1060,9 +1534,15 @@ nhl_extract_luks_name_from_hardware() {
   local name=""
 
   hw=$(nhl_host_hardware_path "$hostName")
+
   [ -f "$hw" ] || return 1
 
-  name=$(sed -n 's/^[[:space:]]*boot\.initrd\.luks\.devices\."\([^"]*\)"\.device[[:space:]]*=[[:space:]]*".*";/\1/p' "$hw" | head -n1)
+  name=$(
+    sed -n \
+      's/^[[:space:]]*boot\.initrd\.luks\.devices\."\([^"]*\)"\.device[[:space:]]*=[[:space:]]*".*";/\1/p' \
+      "$hw" |
+      head -n1
+  )
 
   if [ -n "$name" ]; then
     printf "%s\n" "$name"
@@ -1079,9 +1559,15 @@ nhl_extract_luks_device_from_hardware() {
   local dev=""
 
   hw=$(nhl_host_hardware_path "$hostName")
+
   [ -f "$hw" ] || return 1
 
-  dev=$(sed -n 's/^[[:space:]]*boot\.initrd\.luks\.devices\..*\.device[[:space:]]*=[[:space:]]*"\([^"]*\)";/\1/p' "$hw" | head -n1)
+  dev=$(
+    sed -n \
+      's/^[[:space:]]*boot\.initrd\.luks\.devices\..*\.device[[:space:]]*=[[:space:]]*"\([^"]*\)";/\1/p' \
+      "$hw" |
+      head -n1
+  )
 
   if [ -n "$dev" ]; then
     printf "%s\n" "$dev"
@@ -1099,29 +1585,44 @@ nhl_patch_host_for_tpm_unlock() {
   local crypttabLine=""
 
   cfg=$(nhl_host_config_path "$hostName")
+
   [ -f "$cfg" ] || return 1
   [ -n "$luksName" ] || return 1
 
   # Remove TPM mask if present, otherwise TPM-based unlock cannot work.
-  sed -i '/systemd\.mask=dev-tpmrm0\.device/d' "$cfg" || true
+  nhl_sed_file \
+    "$cfg" \
+    -e '/systemd\.mask=dev-tpmrm0\.device/d' || true
 
   if grep -q 'boot\.initrd\.systemd\.enable[[:space:]]*=' "$cfg"; then
-    sed -i 's/boot\.initrd\.systemd\.enable[[:space:]]*=.*/boot.initrd.systemd.enable = true;/' "$cfg" || true
+    nhl_sed_file \
+      "$cfg" \
+      -e 's/boot\.initrd\.systemd\.enable[[:space:]]*=.*/boot.initrd.systemd.enable = true;/' || true
   else
-    nhl_insert_option_before_closing_brace "$cfg" "boot.initrd.systemd.enable = true;"
+    nhl_insert_option_before_closing_brace \
+      "$cfg" \
+      "boot.initrd.systemd.enable = true;"
   fi
 
   if grep -q 'security\.tpm2\.enable[[:space:]]*=' "$cfg"; then
-    sed -i 's/security\.tpm2\.enable[[:space:]]*=.*/security.tpm2.enable = true;/' "$cfg" || true
+    nhl_sed_file \
+      "$cfg" \
+      -e 's/security\.tpm2\.enable[[:space:]]*=.*/security.tpm2.enable = true;/' || true
   else
-    nhl_insert_option_before_closing_brace "$cfg" "security.tpm2.enable = true;"
+    nhl_insert_option_before_closing_brace \
+      "$cfg" \
+      "security.tpm2.enable = true;"
   fi
 
   crypttabLine="boot.initrd.luks.devices.\"${luksName}\".crypttabExtraOpts = [ \"tpm2-device=auto\" \"tpm2-pcrs=7\" ];"
 
-  sed -i "/boot\.initrd\.luks\.devices\.\"${luksName//\//\\/}\"\.crypttabExtraOpts[[:space:]]*=/d" "$cfg" || true
+  nhl_sed_file \
+    "$cfg" \
+    -e "/boot\.initrd\.luks\.devices\.\"${luksName//\//\\/}\"\.crypttabExtraOpts[[:space:]]*=/d" || true
 
-  nhl_insert_option_before_closing_brace "$cfg" "$crypttabLine"
+  nhl_insert_option_before_closing_brace \
+    "$cfg" \
+    "$crypttabLine"
 
   export NHL_ENABLE_TPM_LUKS_ENROLL=1
   export NHL_LUKS_NAME="$luksName"
@@ -1135,7 +1636,14 @@ nhl_prompt_luks_tpm_setup() {
   local luksPassphrase=""
 
   export NHL_ENABLE_TPM_LUKS_ENROLL=0
-  unset NHL_LUKS_DEVICE NHL_LUKS_NAME NHL_RECOVERY_KEY NHL_RECOVERY_KEY_SHA256 NHL_RECOVERY_KEY_SHA512 NHL_LUKS_CURRENT_PASSPHRASE
+
+  unset \
+    NHL_LUKS_DEVICE \
+    NHL_LUKS_NAME \
+    NHL_RECOVERY_KEY \
+    NHL_RECOVERY_KEY_SHA256 \
+    NHL_RECOVERY_KEY_SHA512 \
+    NHL_LUKS_CURRENT_PASSPHRASE
 
   if nhl_is_noninteractive; then
     echo "${WARN} Non-interactive mode detected. Skipping mandatory LUKS+TPM enrollment."
@@ -1160,12 +1668,17 @@ nhl_prompt_luks_tpm_setup() {
 
   echo "${INFO} LUKS device detected at ${luksDevice}. Mandatory BitLocker-style setup is enabled for this installer run."
 
-  if ! nhl_yes_no "Are u sure you have your current LUKS passphrase available now? (y/N): "; then
+  if ! nhl_yes_no \
+    "Are u sure you have your current LUKS passphrase available now? (y/N): "; then
+
     echo "${ERROR} Current LUKS passphrase is required to authorize keyslot changes."
     return 1
   fi
 
-  read -r -s -p "Enter current LUKS passphrase (leave empty to skip TPM/recovery enrollment): " luksPassphrase </dev/tty || true
+  read -r -s -p \
+    "Enter current LUKS passphrase (leave empty to skip TPM/recovery enrollment): " \
+    luksPassphrase </dev/tty || true
+
   printf "\n"
 
   if [ -z "$luksPassphrase" ]; then
@@ -1173,12 +1686,16 @@ nhl_prompt_luks_tpm_setup() {
     return 0
   fi
 
-  if ! nhl_yes_no "Are u sure? This will modify LUKS keyslots on ${luksDevice}. (y/N): "; then
+  if ! nhl_yes_no \
+    "Are u sure? This will modify LUKS keyslots on ${luksDevice}. (y/N): "; then
+
     echo "${ERROR} Confirmation declined. Stopping installer to avoid partial security setup."
     return 1
   fi
 
-  if ! nhl_yes_no "Are u sure, again? TPM auto-unlock + recovery key setup will now be enforced. (y/N): "; then
+  if ! nhl_yes_no \
+    "Are u sure, again? TPM auto-unlock + recovery key setup will now be enforced. (y/N): "; then
+
     echo "${ERROR} Second confirmation declined. Stopping installer."
     return 1
   fi
@@ -1203,7 +1720,9 @@ nhl_generate_recovery_key() {
     return 0
   fi
 
-  head -c 32 /dev/urandom | od -An -tx1 | tr -d ' \n'
+  head -c 32 /dev/urandom |
+    od -An -tx1 |
+    tr -d ' \n'
 }
 
 nhl_run_luks_tpm_enrollment() {
@@ -1254,29 +1773,46 @@ nhl_run_luks_tpm_enrollment() {
   fi
 
   tmpKeyFile=$(mktemp)
+
   chmod 600 "$tmpKeyFile"
   printf "%s" "$recoveryKey" >"$tmpKeyFile"
 
   echo "${INFO} Adding generated recovery key to LUKS keyslots."
 
-  if ! printf "%s" "$currentPassphrase" | sudo cryptsetup luksAddKey "$luksDevice" "$tmpKeyFile" --key-file -; then
+  if ! printf "%s" "$currentPassphrase" |
+    sudo cryptsetup luksAddKey \
+      "$luksDevice" \
+      "$tmpKeyFile" \
+      --key-file -; then
+
     rm -f "$tmpKeyFile"
+
     echo "${WARN} Could not authorize LUKS keyslot update (missing/wrong passphrase). Skipping TPM/recovery enrollment."
     return 0
   fi
 
   echo "${INFO} Enrolling TPM2 unlock (PCR7 binding) on ${luksDevice}."
 
-  if ! sudo systemd-cryptenroll "$luksDevice" --tpm2-device=auto --tpm2-pcrs=7; then
+  if ! sudo systemd-cryptenroll \
+    "$luksDevice" \
+    --tpm2-device=auto \
+    --tpm2-pcrs=7; then
+
     rm -f "$tmpKeyFile"
+
     echo "${ERROR} TPM enrollment failed. Recovery key was added, but TPM unlock is not active."
     return 1
   fi
 
   rm -f "$tmpKeyFile"
 
-  sha256=$(printf "%s" "$recoveryKey" | sha256sum | awk '{print $1}')
-  sha512=$(printf "%s" "$recoveryKey" | sha512sum | awk '{print $1}')
+  sha256=$(printf "%s" "$recoveryKey" |
+    sha256sum |
+    awk '{print $1}')
+
+  sha512=$(printf "%s" "$recoveryKey" |
+    sha512sum |
+    awk '{print $1}')
 
   hashFile="./hosts/$hostName/.luks-recovery-key.sha256"
   hashFile512="./hosts/$hostName/.luks-recovery-key.sha512"
@@ -1303,6 +1839,7 @@ EOF
   export NHL_LUKS_DEVICE="$luksDevice"
 
   unset NHL_LUKS_CURRENT_PASSPHRASE
+
   currentPassphrase=""
 
   echo "${OK} TPM + recovery-key enrollment completed for ${luksDevice}."
@@ -1332,7 +1869,9 @@ nhl_print_recovery_key_and_confirm() {
     printf "%s\n" "${recoveryKey}"
   fi
 
-  until nhl_yes_no "Are u sure, again, that your recovery key is safely stored? (y/N): "; do
+  until nhl_yes_no \
+    "Are u sure, again, that your recovery key is safely stored? (y/N): "; do
+
     printf "%s\n" "${WARN} Recovery key still needs to be saved before reboot."
     printf "%s\n" "${recoveryKey}"
   done
