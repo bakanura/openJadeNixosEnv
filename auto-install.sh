@@ -67,44 +67,44 @@ if type nhl_check_go_version >/dev/null 2>&1; then
     nhl_check_go_version
 fi
 
-# Verify fwdupd availability.
-if ! command -v fwdupd >/dev/null 2>&1; then
-    echo "$WARN fwdupd is not installed."
+# Verify fwupd availability.
+if ! command -v fwupd >/dev/null 2>&1; then
+    echo "$WARN fwupd is not installed."
 
-    read -r -p "Install fwdupd and rebuild NixOS now? [Y/n/c=continue] " fwdupd_choice
+    read -r -p "Install fwupd and rebuild NixOS now? [Y/n/c=continue] " fwupd_choice
 
-    case "${fwdupd_choice,,}" in
+    case "${fwupd_choice,,}" in
         c|continue)
-            echo "$NOTE Continuing without fwdupd."
+            echo "$NOTE Continuing without fwupd."
             ;;
         n|no)
-            echo "$NOTE Skipping fwdupd installation."
+            echo "$NOTE Skipping fwupd installation."
             ;;
         *)
-            echo "$CAT Adding fwdupd to the NixOS configuration..."
+            echo "$CAT Adding fwupd to the NixOS configuration..."
 
             CONFIG="/etc/nixos/configuration.nix"
 
-            if ! grep -qE '(^|[[:space:]])fwdupd([[:space:]]|$)' "$CONFIG"; then
-                sudo sed -i '/environment\.systemPackages = with pkgs; \[/a\    fwdupd' "$CONFIG"
-                echo "$OK Added fwdupd to $CONFIG."
+            if ! grep -qE '(^|[[:space:]])fwupd([[:space:]]|$)' "$CONFIG"; then
+                sudo sed -i '/environment\.systemPackages = with pkgs; \[/a\    fwupd' "$CONFIG"
+                echo "$OK Added fwupd to $CONFIG."
             else
-                echo "$NOTE fwdupd is already present in the NixOS configuration."
+                echo "$NOTE fwupd is already present in the NixOS configuration."
             fi
 
             echo "$CAT Rebuilding NixOS before continuing..."
             sudo nixos-rebuild switch
 
-            if ! command -v fwdupd >/dev/null 2>&1; then
-                echo "$ERROR fwdupd is still not available after the NixOS rebuild."
+            if ! command -v fwupd >/dev/null 2>&1; then
+                echo "$ERROR fwupd is still not available after the NixOS rebuild."
                 exit 1
             fi
 
-            echo "$OK fwdupd is installed and ready."
+            echo "$OK fwupd is installed and ready."
             ;;
     esac
 else
-    echo "$OK fwdupd is already installed."
+    echo "$OK fwupd is already installed."
 fi
 
 echo "$NOTE Switching to the home directory"
