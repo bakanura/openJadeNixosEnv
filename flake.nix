@@ -51,6 +51,7 @@
       identity =
         if builtins.pathExists identityPath
         then builtins.fromJSON (builtins.readFile identityPath)
+        else {};
     in {
       username = identity.username;
     };
