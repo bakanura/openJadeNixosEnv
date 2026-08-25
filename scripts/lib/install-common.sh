@@ -522,12 +522,28 @@ nhl_insert_option_before_closing_brace() {
   local line="$2"
   local last_brace_line
 
-  last_brace_line=$(grep -n '^[[:space:]]*}[[:space:]]*$' "$file" | tail -n 1 | cut -d: -f1)
+  if [ ! -f "$file" ]; then
+    echo "[ERROR] Cannot modify missing file: $file"
+    return 1
+  fi
 
-  if [ -n "$last_brace_line" ]; then
-    sed -i "${last_brace_line}i\  ${line}" "$file"
+  last_brace_line=$(
+    grep -n '^[[:space:]]*}[[:space:]]*$' "$file" |
+      tail -n 1 |
+      cut -d: -f1
+  )
+
+  if [ -z "$last_brace_line" ]; then
+    echo "[ERROR] Could not find closing '}' in: $file"
+    return 1
+  fi
+
+  # /etc/nixos/configuration.nix is normally root-owned.
+  # Use sudo when the current user cannot write the file.
+  if [ -w "$file" ]; then
+    sed -i "${last_brace_line}i\\  ${line}" "$file"
   else
-    printf '\n  %s\n' "$line" >>"$file"
+    sudo sed -i "${last_brace_line}i\\  ${line}" "$file"
   fi
 }
 
