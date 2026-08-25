@@ -1,5 +1,4 @@
-{host, ...}: let
-  hostVars = import ../../../hosts/${host}/variables.nix;
+{hostVars, ...}: let
 in {
   programs.vscode = {
     enable = true;
