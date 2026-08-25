@@ -8,7 +8,6 @@
 
   gitBin = lib.getExe pkgs.git;
   ghBin = lib.getExe pkgs.gh;
-  risiqConfigPath = "$HOME/.config/git/identities/risiq.de.inc";
   bakaConfigPath = "$HOME/.config/git/identities/baka.inc";
 in {
   programs.git = {
