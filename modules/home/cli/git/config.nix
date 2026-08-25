@@ -98,7 +98,7 @@ in {
     '')
   ];
 
-  home.shellAliases = {
-    git = "git-risiq";
-  };
+  #home.shellAliases = {
+    #git = "git-baka";
+  #};
 }
