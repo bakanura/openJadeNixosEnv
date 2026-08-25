@@ -26,3 +26,13 @@ NixOS-Hyprland-backups/
 __pycache__/
 *.pyc
 .aider*
+
+# ---------------------------------------------------------------------------
+# Machine-local NixOS host configurations
+# ---------------------------------------------------------------------------
+# hosts/default is the centrally managed template.
+# Every other hosts/<name>/ directory is generated locally by the installer.
+
+hosts/*
+!hosts/default/
+!hosts/default/**
