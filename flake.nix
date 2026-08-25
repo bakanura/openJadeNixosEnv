@@ -49,7 +49,7 @@
     # installer. They are intentionally NOT required to be Git-tracked.
     # -----------------------------------------------------------------------
     hostEntries = builtins.readDir ./hosts;
-
+    
     hostNames =
       builtins.filter
         (
