@@ -1,10 +1,9 @@
 {
-  host,
+  hostVars,
   lib,
   osConfig ? null,
   ...
 }: let
-  hostVars = import ../../hosts/${host}/variables.nix;
   configuredBrowser = hostVars.browser or "firefox";
   browserDesktop =
     if configuredBrowser == "google-chrome-stable"
