@@ -128,13 +128,13 @@ nhl_resolve_install_username() {
     return 0
   fi
 
-  # 3. Fallback for non-interactive automation
+  # 4. Fallback for non-interactive automation
   if nhl_is_noninteractive; then
     printf "nixos-bootstrap\n"
     return 0
   fi
 
-  # 4. Interactive fallback: Use the first UID 1000 user found (skipping root)
+  # 5. Interactive fallback: Use the first UID 1000 user found (skipping root)
   local real_user
   real_user=$(awk -F: '$3 == 1000 {print $1}' /etc/passwd | head -n1)
   printf "%s\n" "${real_user:-roederp}"
@@ -165,9 +165,11 @@ nhl_sanitize_hostname() {
   sanitized=$(printf "%s" "$raw" | tr '[:space:]' '-' | tr -cd '[:alnum:]-')
   sanitized=$(printf "%s" "$sanitized" | sed 's/--*/-/g; s/^-//; s/-$//')
   sanitized="${sanitized:0:63}"
+
   if [ -z "$sanitized" ]; then
     sanitized="UNKNOWN-HOST"
   fi
+
   printf "%s\n" "$sanitized"
 }
 
@@ -179,13 +181,16 @@ nhl_derive_hostname() {
   local hostName=""
 
   serial=$(nhl_detect_host_serial)
+
   # Keep alphanumeric only for hostname safety.
   serial_clean=$(echo "$serial" | tr -cd '[:alnum:]')
+
   if [ -z "$serial_clean" ]; then
     serial_clean="UNKNOWN"
   fi
 
   hostName="${prefix}-${serial_clean}"
+
   # Linux hostname max is 63 chars.
   hostName=$(nhl_sanitize_hostname "$hostName")
 
@@ -202,6 +207,7 @@ nhl_prompt_hostname() {
 
   serial=$(nhl_detect_host_serial)
   serial_clean=$(printf "%s" "$serial" | tr -cd '[:alnum:]')
+
   if [ -z "$serial_clean" ]; then
     serial_clean="UNKNOWN"
   fi
@@ -216,35 +222,44 @@ nhl_prompt_hostname() {
 
   while true; do
     mode=$(nhl_read_input "Choose hostname style: [s]yntax + serial / [u]nique name (required): " "")
+
     if printf "%s" "$mode" | grep -qi '^[uUcC]'; then
       custom=$(nhl_read_input "Enter the exact hostname to use (no serial will be appended): " "${NHL_STATE_HOSTNAME_VALUE:-}")
       custom=$(nhl_sanitize_hostname "$custom")
+
       if [ -z "$custom" ] || [ "$custom" = "UNKNOWN-HOST" ]; then
         echo "[WARN] Please enter a non-empty hostname."
         continue
       fi
+
       export NHL_SELECTED_HOSTNAME_MODE="custom"
       export NHL_SELECTED_HOSTNAME_VALUE="$custom"
       printf "%s\n" "${NHL_SELECTED_HOSTNAME_VALUE}"
       return 0
     fi
+
     if printf "%s" "$mode" | grep -qi '^[sSpP]'; then
       break
     fi
+
     echo "[WARN] Please choose 's' for syntax + serial or 'u' for a unique hostname."
   done
 
   while true; do
     prefix=$(nhl_read_input "Enter the hostname syntax/prefix to combine with this device serial (${serial_clean}): " "${NHL_STATE_HOSTNAME_PREFIX:-$default_prefix}")
     prefix=$(nhl_sanitize_hostname "$prefix")
+
     if [ -n "$prefix" ] && [ "$prefix" != "UNKNOWN-HOST" ]; then
       break
     fi
+
     echo "[WARN] Please enter a non-empty hostname syntax/prefix."
   done
+
   export NHL_SELECTED_HOSTNAME_MODE="prefix-serial"
   export NHL_SELECTED_HOSTNAME_PREFIX="$prefix"
   export NHL_SELECTED_HOSTNAME_VALUE="$(nhl_derive_hostname "${NHL_SELECTED_HOSTNAME_PREFIX}")"
+
   printf "%s\n" "${NHL_SELECTED_HOSTNAME_VALUE}"
 }
 
@@ -325,11 +340,13 @@ nhl_mark_device_enrolled() {
   if [ -r /etc/machine-id ]; then
     mid=$(cat /etc/machine-id 2>/dev/null || true)
   fi
+
   if [ -r /sys/class/dmi/id/product_serial ]; then
     serial=$(tr -d '[:space:]' </sys/class/dmi/id/product_serial 2>/dev/null || true)
   fi
 
   mkdir -p "./hosts/$hostName"
+
   cat >"$marker" <<EOF
 machine_id=$mid
 serial=$serial
@@ -370,7 +387,9 @@ nhl_load_installer_state() {
 }
 
 nhl_save_installer_state() {
-  # Args: $1 hostName, $2 keyboard, $3 timezone, $4 console keymap, $5 fingerprint(0/1), $6 gpu profile, $7 vscode confirm sync(true/false), $8 hostname mode, $9 hostname prefix, $10 hostname value
+  # Args: $1 hostName, $2 keyboard, $3 timezone, $4 console keymap,
+  # $5 fingerprint(0/1), $6 gpu profile, $7 vscode confirm sync(true/false),
+  # $8 hostname mode, $9 hostname prefix, $10 hostname value
   local hostName="$1"
   local keyboardLayout="$2"
   local timeZone="$3"
@@ -414,11 +433,15 @@ nhl_detect_gpu_and_toggle() {
   local cfg="./hosts/$hostName/config.nix"
   [ -f "$cfg" ] || cfg="./hosts/default/config.nix"
 
-  local has_vm=false has_nvidia=false has_amd=false has_intel=false
+  local has_vm=false
+  local has_nvidia=false
+  local has_amd=false
+  local has_intel=false
 
   if hostnamectl | grep -q 'Chassis: vm'; then
     has_vm=true
   fi
+
   if command -v lspci >/dev/null 2>&1; then
     while read -r line; do
       if echo "$line" | grep -qi 'nvidia'; then
@@ -433,6 +456,7 @@ nhl_detect_gpu_and_toggle() {
 
   # Decide detected profile
   local detected=""
+
   if $has_vm; then
     detected="vm"
   elif $has_nvidia && $has_intel; then
@@ -447,11 +471,13 @@ nhl_detect_gpu_and_toggle() {
 
   # Confirm or manually choose profile
   local profile="$detected"
+
   if [ -n "$detected" ]; then
     if ! nhl_yes_no "Detected GPU profile: ${detected}. Use this? (Y/n): "; then
       profile=""
     fi
   fi
+
   if [ -z "$profile" ]; then
     local default_profile="${NHL_STATE_GPU_PROFILE:-amd}"
     profile=$(nhl_read_input "Enter your GPU profile (amd|intel|nvidia|nvidia-laptop|vm): [${default_profile}] " "$default_profile")
@@ -495,11 +521,13 @@ nhl_insert_option_before_closing_brace() {
   local file="$1"
   local line="$2"
   local last_brace_line
+
   last_brace_line=$(grep -n '^[[:space:]]*}[[:space:]]*$' "$file" | tail -n 1 | cut -d: -f1)
+
   if [ -n "$last_brace_line" ]; then
     sed -i "${last_brace_line}i\  ${line}" "$file"
   else
-    printf '\n  %s\n' "$line" >> "$file"
+    printf '\n  %s\n' "$line" >>"$file"
   fi
 }
 
@@ -516,7 +544,11 @@ nhl_lookup_timezone_from_city() {
 
   # Minimal URL encoding for common city input.
   encoded=$(printf "%s" "$city" | sed -e 's/%/%25/g' -e 's/ /%20/g')
-  resp=$(curl -fsSL --max-time 10 "https://geocoding-api.open-meteo.com/v1/search?name=${encoded}&count=1&language=en&format=json" 2>/dev/null || true)
+
+  resp=$(curl -fsSL --max-time 10 \
+    "https://geocoding-api.open-meteo.com/v1/search?name=${encoded}&count=1&language=en&format=json" \
+    2>/dev/null || true)
+
   tz=$(echo "$resp" | tr -d '\n' | sed -n 's/.*"timezone":"\([^"]*\)".*/\1/p' | head -n1)
 
   if [ -n "$tz" ] && echo "$tz" | grep -q '/'; then
@@ -533,6 +565,7 @@ nhl_detect_timezone_auto() {
 
   if command -v timedatectl >/dev/null 2>&1; then
     tz=$(timedatectl show -p Timezone --value 2>/dev/null || true)
+
     if [ -n "$tz" ] && [ "$tz" != "n/a" ] && [ "$tz" != "UTC" ] && echo "$tz" | grep -q '/'; then
       printf "%s\n" "$tz"
       return 0
@@ -541,6 +574,7 @@ nhl_detect_timezone_auto() {
 
   if command -v curl >/dev/null 2>&1; then
     tz=$(curl -fsSL --max-time 8 https://ipapi.co/timezone 2>/dev/null | tr -d '[:space:]' || true)
+
     if [ -n "$tz" ] && echo "$tz" | grep -q '/'; then
       printf "%s\n" "$tz"
       return 0
@@ -568,8 +602,10 @@ nhl_prompt_timezone_console() {
     echo "${OK} Detected timezone automatically: ${timeZone}"
   else
     city=$(nhl_read_input "Could not auto-detect timezone. Enter your current city (e.g. Mannheim): " "")
+
     if [ -n "$city" ]; then
       timeZone=$(nhl_lookup_timezone_from_city "$city" || true)
+
       if [ -n "$timeZone" ]; then
         echo "${OK} Mapped city '${city}' to timezone: ${timeZone}"
       fi
@@ -582,31 +618,33 @@ nhl_prompt_timezone_console() {
   fi
 
   if [ -n "$timeZone" ]; then
-    # Set explicit timezone and disable automatic
+    # Set explicit timezone and disable automatic.
     if grep -q 'time\.timeZone' "$cfg"; then
       sed -i "s|time\.timeZone = \".*\";|time.timeZone = \"$timeZone\";|" "$cfg" || true
     else
       nhl_insert_option_before_closing_brace "$cfg" "time.timeZone = \"$timeZone\";"
     fi
+
     if grep -q 'services\.automatic-timezoned\.enable' "$cfg"; then
       sed -i 's/services\.automatic-timezoned\.enable = [^;]*/services.automatic-timezoned.enable = false/' "$cfg" || true
     else
       nhl_insert_option_before_closing_brace "$cfg" "services.automatic-timezoned.enable = false;"
     fi
   else
-    # Prefer automatic time zone if still unknown
+    # Prefer automatic time zone if still unknown.
     if grep -q 'services\.automatic-timezoned\.enable' "$cfg"; then
-      sed -i 's/services\.automatic-timezoned\.enable = [^;]*/services.automatic-timezoned.enable = true/' "$cfg" || true
+      sed -i 's/services.automatic-timezoned.enable = [^;]*/services.automatic-timezoned.enable = true/' "$cfg" || true
     else
       nhl_insert_option_before_closing_brace "$cfg" "services.automatic-timezoned.enable = true;"
     fi
-    # Remove explicit time.timeZone if present
+
+    # Remove explicit time.timeZone if present.
     sed -i '/time\.timeZone[[:space:]]*=/{d}' "$cfg" || true
   fi
 
   # Console keymap follows chosen keyboard layout by default.
   local consoleKeyMap="${NHL_STATE_CONSOLE_KEYMAP:-$defKb}"
-  # Replace any existing console.keyMap assignment
+
   if grep -q 'console\.keyMap' "$cfg"; then
     sed -i "s|console\.keyMap = \".*\";|console.keyMap = \"$consoleKeyMap\";|" "$cfg" || true
   else
@@ -623,7 +661,8 @@ nhl_check_go_version() {
   local go_version=""
 
   if command -v nix >/dev/null 2>&1; then
-    nix_go_version=$(NIX_CONFIG="experimental-features = nix-command flakes" nix eval --raw "nixpkgs#go.version" 2>/dev/null || true)
+    nix_go_version=$(NIX_CONFIG="experimental-features = nix-command flakes" \
+      nix eval --raw "nixpkgs#go.version" 2>/dev/null || true)
   fi
 
   if [ -n "$nix_go_version" ]; then
@@ -631,22 +670,183 @@ nhl_check_go_version() {
       echo "${ERROR} Go in nixpkgs is ${nix_go_version}, but ${min_version} or greater is required."
       exit 1
     fi
+
     echo "${OK} Go in nixpkgs is ${nix_go_version} (>= ${min_version})."
     return 0
   fi
 
   if command -v go >/dev/null 2>&1; then
     go_version=$(go version | awk '{print $3}' | sed 's/^go//')
+
     if [ -n "$go_version" ] && [ "$(printf '%s\n' "$min_version" "$go_version" | sort -V | head -n1)" = "$min_version" ]; then
       echo "${OK} Go is ${go_version} (>= ${min_version})."
       return 0
     fi
+
     echo "${ERROR} Go is ${go_version}, but ${min_version} or greater is required."
     exit 1
   fi
 
   echo "${ERROR} Unable to determine Go version. Please ensure Go ${min_version}+ is available."
   exit 1
+}
+
+nhl_ensure_required_packages() {
+  local config="/etc/nixos/configuration.nix"
+  local missing=()
+  local cmd
+  local pkg
+  local fwupd_configured=false
+  local fwupd_needs_service=false
+
+  # command -> NixOS package
+  declare -A packages=(
+    [git]="git"
+    [lspci]="pciutils"
+    [go]="go"
+    [fwupdmgr]="fwupd"
+  )
+
+  echo "[ACTION] Checking required packages..."
+
+  for cmd in "${!packages[@]}"; do
+    if command -v "$cmd" >/dev/null 2>&1; then
+      echo "[OK] $cmd is installed."
+    else
+      echo "[WARN] $cmd is not installed."
+      missing+=("${packages[$cmd]}")
+    fi
+  done
+
+  # fwupdmgr requires the fwupd system service, not just the binary.
+  if grep -qE 'services\.fwupd\.enable[[:space:]]*=[[:space:]]*true[[:space:]]*;' "$config" 2>/dev/null; then
+    fwupd_configured=true
+  fi
+
+  if command -v fwupdmgr >/dev/null 2>&1; then
+    if ! systemctl is-active --quiet fwupd.service 2>/dev/null; then
+      echo "[WARN] fwupd is installed but fwupd.service is not running."
+      fwupd_needs_service=true
+    else
+      echo "[OK] fwupd daemon is running."
+    fi
+  fi
+
+  if [ "${#missing[@]}" -eq 0 ] && \
+     [ "$fwupd_configured" = true ] && \
+     [ "$fwupd_needs_service" = false ]; then
+    echo "[OK] All required packages and services are available."
+    return 0
+  fi
+
+  echo
+  echo "[WARN] Required packages/services are missing or not configured."
+
+  if [ "${#missing[@]}" -gt 0 ]; then
+    echo "[INFO] Missing packages:"
+    printf '  - %s\n' "${missing[@]}"
+  fi
+
+  if [ "$fwupd_configured" = false ]; then
+    echo "  - services.fwupd.enable = true"
+  fi
+
+  if [ "$fwupd_needs_service" = true ]; then
+    echo "  - fwupd.service"
+  fi
+
+  echo
+
+  local choice=""
+  choice=$(nhl_read_input \
+    "Add/fix required packages and fwupd in NixOS, then rebuild? [Y/n/c=continue] " \
+    "y")
+
+  case "${choice,,}" in
+    c|continue)
+      echo "[NOTE] Continuing without fixing missing requirements."
+      return 0
+      ;;
+    n|no)
+      echo "[NOTE] Skipping required package/service setup."
+      return 0
+      ;;
+  esac
+
+  if [ ! -f "$config" ]; then
+    echo "[ERROR] $config does not exist."
+    return 1
+  fi
+
+  echo "[ACTION] Updating $config..."
+
+  # Ensure environment.systemPackages exists when packages are missing.
+  if [ "${#missing[@]}" -gt 0 ]; then
+    if ! grep -q 'environment\.systemPackages' "$config"; then
+      cat <<'EOF' | sudo tee -a "$config" >/dev/null
+
+environment.systemPackages = with pkgs; [
+];
+EOF
+    fi
+
+    for pkg in "${missing[@]}"; do
+      # Match package names as individual Nix list entries rather than
+      # accidentally matching substrings elsewhere in the file.
+      if ! grep -qE "^[[:space:]]*${pkg}[[:space:]]*$" "$config"; then
+        sudo sed -i \
+          "/environment\.systemPackages = with pkgs; \[/a\\    ${pkg}" \
+          "$config"
+
+        echo "[OK] Added $pkg."
+      else
+        echo "[NOTE] $pkg is already in the NixOS configuration."
+      fi
+    done
+  fi
+
+  # fwupd needs both the package and the NixOS service.
+  if [ "$fwupd_configured" = false ]; then
+    echo "[ACTION] Enabling fwupd service..."
+
+    if grep -q 'services\.fwupd\.enable' "$config"; then
+      sudo sed -i \
+        's/services\.fwupd\.enable[[:space:]]*=[[:space:]]*[^;]*;/services.fwupd.enable = true;/' \
+        "$config"
+    else
+      printf '\nservices.fwupd.enable = true;\n' | \
+        sudo tee -a "$config" >/dev/null
+    fi
+
+    echo "[OK] Added services.fwupd.enable = true."
+  fi
+
+  echo
+  echo "[ACTION] Rebuilding NixOS before continuing..."
+
+  if ! sudo nixos-rebuild switch; then
+    echo "[ERROR] NixOS rebuild failed."
+    return 1
+  fi
+
+  echo "[OK] NixOS rebuild completed."
+
+  # Verify every command again after the rebuild.
+  for cmd in "${!packages[@]}"; do
+    if ! command -v "$cmd" >/dev/null 2>&1; then
+      echo "[ERROR] $cmd is still unavailable after the rebuild."
+      return 1
+    fi
+  done
+
+  # Verify the actual fwupd daemon.
+  if ! systemctl is-active --quiet fwupd.service 2>/dev/null; then
+    echo "[ERROR] fwupd.service is still not running after the rebuild."
+    echo "[ERROR] fwupdmgr cannot communicate with the fwupd daemon."
+    return 1
+  fi
+
+  echo "[OK] All required packages and services are installed and available."
 }
 
 nhl_prompt_fingerprint() {
@@ -658,6 +858,7 @@ nhl_prompt_fingerprint() {
   local enable_fp
   local default_prompt="(y/N)"
   local default_value="n"
+
   if [ "${NHL_STATE_FINGERPRINT:-false}" = "true" ]; then
     default_prompt="(Y/n)"
     default_value="y"
@@ -671,6 +872,7 @@ nhl_prompt_fingerprint() {
     else
       nhl_insert_option_before_closing_brace "$cfg" "local.security.fingerprint.enable = true;"
     fi
+
     export NHL_ENABLE_FINGERPRINT=1
     echo "${OK} Fingerprint login enabled in host config."
   else
@@ -679,6 +881,7 @@ nhl_prompt_fingerprint() {
     else
       nhl_insert_option_before_closing_brace "$cfg" "local.security.fingerprint.enable = false;"
     fi
+
     export NHL_ENABLE_FINGERPRINT=0
     echo "${NOTE} Fingerprint login left disabled."
   fi
@@ -692,6 +895,7 @@ nhl_prompt_vscode_confirm_sync() {
 
   local default_prompt="(y/N)"
   local default_value="n"
+
   if [ "${NHL_STATE_VSCODE_CONFIRM_SYNC:-true}" = "false" ]; then
     default_prompt="(Y/n)"
     default_value="y"
@@ -706,6 +910,7 @@ nhl_prompt_vscode_confirm_sync() {
     else
       nhl_insert_option_before_closing_brace "$vars" "vscodeGitConfirmSync = false; # false skips the VS Code sync confirmation prompt."
     fi
+
     export NHL_VSCODE_CONFIRM_SYNC=false
     echo "${OK} VS Code sync confirmation disabled."
   else
@@ -714,6 +919,7 @@ nhl_prompt_vscode_confirm_sync() {
     else
       nhl_insert_option_before_closing_brace "$vars" "vscodeGitConfirmSync = true; # true keeps the VS Code sync confirmation prompt."
     fi
+
     export NHL_VSCODE_CONFIRM_SYNC=true
     echo "${NOTE} VS Code sync confirmation kept enabled."
   fi
@@ -743,22 +949,31 @@ nhl_enroll_fingerprint() {
   fi
 
   echo "${INFO} Starting fingerprint enrollment for ${userName}..."
+
   sudo fprintd-enroll "$userName" || {
     echo "${WARN} Enrollment did not complete. You can retry later: sudo fprintd-enroll ${userName}"
     return 0
   }
+
   echo "${OK} Fingerprint enrollment completed."
 }
 
 nhl_prompt_firmware_updates() {
-  # Optional pre-install firmware inspection/update helper (safe no-op if fwupd is unavailable).
+  # Optional pre-install firmware inspection/update helper.
+  # Package/service setup is handled centrally by nhl_ensure_required_packages.
   if ! nhl_yes_no "Check firmware updates with fwupd before continuing? (y/N): "; then
     return 0
   fi
 
   if ! command -v fwupdmgr >/dev/null 2>&1; then
-    echo "${WARN} fwupdmgr is not installed in this environment."
-    echo "${NOTE} You can run later after install: sudo fwupdmgr refresh --force && sudo fwupdmgr get-updates"
+    echo "${WARN} fwupdmgr is not installed."
+    echo "${NOTE} The installer will continue without firmware inspection."
+    return 0
+  fi
+
+  if ! systemctl is-active --quiet fwupd.service 2>/dev/null; then
+    echo "${WARN} fwupd.service is not running."
+    echo "${NOTE} Firmware inspection cannot continue without the fwupd daemon."
     return 0
   fi
 
@@ -769,8 +984,10 @@ nhl_prompt_firmware_updates() {
   sudo fwupdmgr get-devices || true
 
   echo "${INFO} Checking for available firmware updates..."
+
   local updates_output=""
   updates_output=$(sudo fwupdmgr get-updates 2>&1 || true)
+
   printf "%s\n" "$updates_output"
 
   if echo "$updates_output" | grep -qi "No updates available"; then
@@ -788,9 +1005,11 @@ nhl_host_config_path() {
   # Args: $1 = hostName
   local hostName="$1"
   local cfg="./hosts/$hostName/config.nix"
+
   if [ ! -f "$cfg" ]; then
     cfg="./hosts/default/config.nix"
   fi
+
   printf "%s\n" "$cfg"
 }
 
@@ -798,9 +1017,11 @@ nhl_host_hardware_path() {
   # Args: $1 = hostName
   local hostName="$1"
   local hw="./hosts/$hostName/hardware.nix"
+
   if [ ! -f "$hw" ]; then
     hw="./hosts/default/hardware.nix"
   fi
+
   printf "%s\n" "$hw"
 }
 
@@ -814,6 +1035,7 @@ nhl_extract_luks_name_from_hardware() {
   [ -f "$hw" ] || return 1
 
   name=$(sed -n 's/^[[:space:]]*boot\.initrd\.luks\.devices\."\([^"]*\)"\.device[[:space:]]*=[[:space:]]*".*";/\1/p' "$hw" | head -n1)
+
   if [ -n "$name" ]; then
     printf "%s\n" "$name"
     return 0
@@ -832,6 +1054,7 @@ nhl_extract_luks_device_from_hardware() {
   [ -f "$hw" ] || return 1
 
   dev=$(sed -n 's/^[[:space:]]*boot\.initrd\.luks\.devices\..*\.device[[:space:]]*=[[:space:]]*"\([^"]*\)";/\1/p' "$hw" | head -n1)
+
   if [ -n "$dev" ]; then
     printf "%s\n" "$dev"
     return 0
@@ -867,7 +1090,9 @@ nhl_patch_host_for_tpm_unlock() {
   fi
 
   crypttabLine="boot.initrd.luks.devices.\"${luksName}\".crypttabExtraOpts = [ \"tpm2-device=auto\" \"tpm2-pcrs=7\" ];"
+
   sed -i "/boot\.initrd\.luks\.devices\.\"${luksName//\//\\/}\"\.crypttabExtraOpts[[:space:]]*=/d" "$cfg" || true
+
   nhl_insert_option_before_closing_brace "$cfg" "$crypttabLine"
 
   export NHL_ENABLE_TPM_LUKS_ENROLL=1
@@ -914,6 +1139,7 @@ nhl_prompt_luks_tpm_setup() {
 
   read -r -s -p "Enter current LUKS passphrase (leave empty to skip TPM/recovery enrollment): " luksPassphrase </dev/tty || true
   printf "\n"
+
   if [ -z "$luksPassphrase" ]; then
     echo "${NOTE} No passphrase entered. Skipping TPM/recovery enrollment without error."
     return 0
@@ -936,7 +1162,9 @@ nhl_prompt_luks_tpm_setup() {
 
   export NHL_LUKS_DEVICE="$luksDevice"
   export NHL_LUKS_CURRENT_PASSPHRASE="$luksPassphrase"
+
   luksPassphrase=""
+
   echo "${OK} Host config patched for TPM-bound unlock on ${luksDevice}."
   echo "${NOTE} Enrollment will continue after nixos-rebuild switch."
 }
@@ -991,6 +1219,7 @@ nhl_run_luks_tpm_enrollment() {
   fi
 
   recoveryKey=$(nhl_generate_recovery_key)
+
   if [ -z "$recoveryKey" ]; then
     echo "${ERROR} Failed to generate recovery key."
     return 1
@@ -1001,6 +1230,7 @@ nhl_run_luks_tpm_enrollment() {
   printf "%s" "$recoveryKey" >"$tmpKeyFile"
 
   echo "${INFO} Adding generated recovery key to LUKS keyslots."
+
   if ! printf "%s" "$currentPassphrase" | sudo cryptsetup luksAddKey "$luksDevice" "$tmpKeyFile" --key-file -; then
     rm -f "$tmpKeyFile"
     echo "${WARN} Could not authorize LUKS keyslot update (missing/wrong passphrase). Skipping TPM/recovery enrollment."
@@ -1008,6 +1238,7 @@ nhl_run_luks_tpm_enrollment() {
   fi
 
   echo "${INFO} Enrolling TPM2 unlock (PCR7 binding) on ${luksDevice}."
+
   if ! sudo systemd-cryptenroll "$luksDevice" --tpm2-device=auto --tpm2-pcrs=7; then
     rm -f "$tmpKeyFile"
     echo "${ERROR} TPM enrollment failed. Recovery key was added, but TPM unlock is not active."
@@ -1021,23 +1252,28 @@ nhl_run_luks_tpm_enrollment() {
 
   hashFile="./hosts/$hostName/.luks-recovery-key.sha256"
   hashFile512="./hosts/$hostName/.luks-recovery-key.sha512"
+
   umask 077
+
   cat >"$hashFile" <<EOF
 device=$luksDevice
 sha256=$sha256
 generated_at=$(date -Iseconds)
 EOF
+
   cat >"$hashFile512" <<EOF
 device=$luksDevice
 sha512=$sha512
 generated_at=$(date -Iseconds)
 EOF
+
   chmod 600 "$hashFile" "$hashFile512" 2>/dev/null || true
 
   export NHL_RECOVERY_KEY="$recoveryKey"
   export NHL_RECOVERY_KEY_SHA256="$sha256"
   export NHL_RECOVERY_KEY_SHA512="$sha512"
   export NHL_LUKS_DEVICE="$luksDevice"
+
   unset NHL_LUKS_CURRENT_PASSPHRASE
   currentPassphrase=""
 
