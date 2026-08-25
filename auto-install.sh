@@ -399,16 +399,42 @@ echo "$NOTE Selected hostname: $hostName"
 
 echo "-----"
 
-if type nhl_preflight_fresh_install_target >/dev/null 2>&1; then
-    nhl_preflight_fresh_install_target \
-        "${NHL_REPO_ROOT}" \
-        "$hostName" \
-        || exit 1
+# Resolve the username and write host identity BEFORE flake validation.
+# The flake derives nixosConfigurations from the host identity metadata,
+# so the identity must exist before nhl_preflight_fresh_install_target
+# checks whether the host is exported.
+if type nhl_resolve_install_username >/dev/null 2>&1; then
+    installusername=$(nhl_resolve_install_username)
+else
+    installusername="${USER:-$(id -un)}"
 fi
 
-# ---------------------------------------------------------------------------
-# Reuse an existing host profile when the device is already enrolled.
-# ---------------------------------------------------------------------------
+if [ -z "$installusername" ]; then
+    echo "${ERROR} Unable to determine installation username."
+    exit 1
+fi
+
+echo "$NOTE Installation username: $installusername"
+
+# IMPORTANT:
+# Create identity.json now, before any flake validation.
+if type nhl_patch_flake_identity >/dev/null 2>&1; then
+    if ! nhl_patch_flake_identity "$NHL_REPO_ROOT" "$hostName" "$installusername"; then
+        echo "${ERROR} Failed to write host identity for '$hostName'."
+        exit 1
+    fi
+else
+    echo "${ERROR} nhl_patch_flake_identity is unavailable."
+    exit 1
+fi
+
+echo "$OK Host identity prepared for hosts/$hostName/identity.json"
+
+# Now the dynamically-generated flake should expose nixosConfigurations.$hostName.
+if type nhl_preflight_fresh_install_target >/dev/null 2>&1; then
+    nhl_preflight_fresh_install_target "${NHL_REPO_ROOT}" "$hostName" || exit 1
+fi
+
 is_enrolled=0
 
 if type nhl_is_enrolled_device >/dev/null 2>&1 \
@@ -601,18 +627,10 @@ echo "$NOTE Applying required Nix settings before installation"
 git config --global user.name "installer"
 git config --global user.email "installer@gmail.com"
 
-# ---------------------------------------------------------------------------
-# IMPORTANT:
-#
-# The host files and identity must be fully modified BEFORE git add.
-# ---------------------------------------------------------------------------
-if type nhl_patch_flake_identity >/dev/null 2>&1; then
-    nhl_patch_flake_identity \
-        "$NHL_REPO_ROOT" \
-        "$hostName" \
-        "$installusername"
-fi
+# Stage the generated host configuration.
+git add .
 
+# identity.json was already created before flake preflight.
 echo "$OK Host identity written to hosts/$hostName/identity.json"
 
 # ---------------------------------------------------------------------------
