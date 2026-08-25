@@ -117,7 +117,7 @@ in {
   };
   vm.guest-services.enable = false;
   local.hardware-clock.enable = false;
-  local.security.fingerprint.enable = false;
+  local.security.fingerprint.enable = true;
 
   # Configure networking.
   networking = {
@@ -168,7 +168,7 @@ in {
   };
 
   # Set your time zone.
-  services.automatic-timezoned.enable = true; # based on IP location
+  services.automatic-timezoned.enable = false; # based on IP location
   services.resolved = {
     enable = true;
     fallbackDns = ["1.1.1.1" "9.9.9.9"];
@@ -382,7 +382,7 @@ in {
     enable = true;
   };
 
-  console.keyMap = "us";
+  console.keyMap = "de";
 
   # For Electron apps to use wayland
   environment.sessionVariables.NIXOS_OZONE_WL = "1";
@@ -402,4 +402,5 @@ in {
   # Before changing this value, read the documentation for this option
   # (e.g. man configuration.nix or on https://nixos.org/nixos/options.html).
   system.stateVersion = "24.11"; # Did you read the comment?
+  time.timeZone = "Europe/Berlin";
 }

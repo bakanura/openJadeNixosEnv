@@ -238,7 +238,7 @@ in {
       '')
     ];
 
-    systemd.services.risiq-framework-fan-curve = {
+    systemd.services.openJade-framework-fan-curve = {
       description = "Framework fan control service";
       wantedBy = ["multi-user.target"];
       after = ["multi-user.target"];

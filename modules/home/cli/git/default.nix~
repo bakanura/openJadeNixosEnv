@@ -1,6 +1,7 @@
 {...}: {
   imports = [
     ./config.nix
+    ./openJade-config.nix
     ./baka-config.nix
   ];
 }

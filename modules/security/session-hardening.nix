@@ -93,7 +93,7 @@ in {
       # Fail closed: if a running hyprlock process exits while session is still
       # marked as locked, terminate the user session so a fresh login is required.
       systemd.user.services.nhl-lockscreen-watchdog = {
-        description = "RISIQ lockscreen watchdog";
+        description = "JODS lockscreen watchdog";
         after = ["graphical-session.target"];
         partOf = ["graphical-session.target"];
         wantedBy = ["graphical-session.target"];

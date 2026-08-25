@@ -9,7 +9,7 @@ This journal tracks the current round of requested fixes and follow-up work for 
 - [ ] Keep the USB persistent block list across rebuilds.
 - [x] Make `usb-guard --release` without a UUID open a reusable blocked-device picker.
 - [ ] Remove duplicated rebuild chatter after sudo auth and fix the quiet-mode spinner line handling.
-- [ ] Make fresh installs ask explicitly for hostname style instead of defaulting to `RISIQ-SERIAL`.
+- [ ] Make fresh installs ask explicitly for hostname style instead of defaulting to `JODS-SERIAL`.
 - [ ] Add extra fresh-install preflight checks for host template readiness.
 - [ ] Improve Firefox/network reliability shortly after boot.
 - [x] Move the stray repo-root `configuration.nix` into a proper aider/Ollama package module.

@@ -42,7 +42,7 @@ in {
       }
     ];
 
-    systemd.services.risiq-battery-charge-threshold = {
+    systemd.services.openJade-battery-charge-threshold = {
       description = "Apply battery charge threshold defaults";
       wantedBy = ["multi-user.target"];
       after = ["local-fs.target"];

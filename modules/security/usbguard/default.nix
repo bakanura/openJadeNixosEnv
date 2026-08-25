@@ -165,7 +165,7 @@ in {
       );
 
       systemd.user.services.nhl-usbguard-review = lib.mkIf cfg.review.enable {
-        description = "RISIQ USBGuard review queue";
+        description = "JODS USBGuard review queue";
         after = ["default.target"];
         wantedBy = ["default.target"];
         serviceConfig = {

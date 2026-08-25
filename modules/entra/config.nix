@@ -140,10 +140,10 @@ in {
             else "0"
           }"
           echo "INTUNE_DEVICE_ID=''${INTUNE_DEVICE_ID:-}"
-          if [ -f /etc/risiq/entra-managed ]; then
-            echo "Marker: /etc/risiq/entra-managed present"
+          if [ -f /etc/openJade/entra-managed ]; then
+            echo "Marker: /etc/openJade/entra-managed present"
           else
-            echo "Marker: /etc/risiq/entra-managed missing"
+            echo "Marker: /etc/openJade/entra-managed missing"
           fi
         '')
         (pkgs.writeShellScriptBin "entra-enroll" ''

@@ -14,7 +14,7 @@ in {
       homeMode = "755";
       isNormalUser = true;
       description = "${gitUsername}";
-      initialPassword = lib.mkIf (username == "risiq-bootstrap") "risiq1234";
+      initialPassword = lib.mkIf (username == "openJade-bootstrap") "risiq1234";
       extraGroups = [
         "networkmanager"
         "wheel"

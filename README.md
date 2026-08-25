@@ -1,4 +1,4 @@
-# NixOS-Hyprland (RISIQ)
+# NixOS-Hyprland (JODS)
 
 A structured NixOS flake for deploying and maintaining a Hyprland-based workstation profile with:
 
@@ -262,8 +262,8 @@ When enabled:
 - Exposes optional `ENTRA_DEVICE_ID`
 - Exposes `INTUNE_MANAGED=1` and `NHL_NONINTERACTIVE` for installer logic
 - Exposes optional `INTUNE_DEVICE_ID`
-- Adds `/etc/risiq/entra-managed` marker
-- Writes `/etc/risiq/entra/managed.conf` configuration
+- Adds `/etc/openJade/entra-managed` marker
+- Writes `/etc/openJade/entra/managed.conf` configuration
 - Installs `intune-portal` (Microsoft Intune Portal client)
 - Installs `microsoft-edge` (recommended for Conditional Access)
 - Installs helper commands: `entra-status`, `intune-status`, `entra-enroll`, `intune-enroll`
