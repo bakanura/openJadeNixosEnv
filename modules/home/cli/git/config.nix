@@ -72,25 +72,7 @@ in {
   };
 
   home.packages = [
-    (pkgs.writeShellScriptBin "git-risiq" ''
-      #!/usr/bin/env bash
-      set -euo pipefail
 
-      ensure_gh_auth() {
-        local host="$1"
-
-        if ! ${ghBin} auth status --hostname "$host" >/dev/null 2>&1; then
-          exec ${ghBin} auth login --hostname "$host" --git-protocol ssh --web
-        fi
-      }
-
-      if [ "''${1-}" = "clone" ]; then
-        ensure_gh_auth "risiq.ghe.com"
-        exec ${gitBin} clone -c include.path="${risiqConfigPath}" "''${@:2}"
-      fi
-
-      exec ${gitBin} "$@"
-    '')
     (pkgs.writeShellScriptBin "baka" ''
       #!/usr/bin/env bash
       set -euo pipefail
