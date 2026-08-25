@@ -46,7 +46,6 @@ else
     echo "$ERROR This is not NixOS or the distribution information is not available."
     exit 1
 fi
-
 ensure_required_packages() {
     local config="/etc/nixos/configuration.nix"
     local missing=()
@@ -71,62 +70,108 @@ ensure_required_packages() {
         fi
     done
 
-    # Everything is already available.
-    if [ "${#missing[@]}" -eq 0 ]; then
-        echo "$OK All required packages are already available."
+    # Check whether fwupd service is configured.
+    local fwupd_configured=false
+    if grep -qE 'services\.fwupd\.enable[[:space:]]*=[[:space:]]*true' "$config" 2>/dev/null; then
+        fwupd_configured=true
+    fi
+
+    # Check whether fwupd daemon is actually available.
+    local fwupd_service_missing=false
+    if ! systemctl is-active --quiet fwupd.service 2>/dev/null; then
+        fwupd_service_missing=true
+        echo "$WARN fwupd daemon is not running."
+    else
+        echo "$OK fwupd daemon is running."
+    fi
+
+    # Nothing needs changing.
+    if [ "${#missing[@]}" -eq 0 ] && \
+       [ "$fwupd_configured" = true ] && \
+       [ "$fwupd_service_missing" = false ]; then
+        echo "$OK All required packages and services are already available."
         echo "-----"
         return 0
     fi
 
     echo
-    echo "$WARN The following required packages are missing:"
-    printf '  - %s\n' "${missing[@]}"
+    echo "$WARN Required components are missing or not configured."
+
+    if [ "${#missing[@]}" -gt 0 ]; then
+        echo "$INFO Missing packages:"
+        printf '  - %s\n' "${missing[@]}"
+    fi
+
+    if [ "$fwupd_configured" = false ]; then
+        echo "  - fwupd service configuration"
+    fi
+
+    if [ "$fwupd_service_missing" = true ]; then
+        echo "  - fwupd daemon"
+    fi
+
     echo
 
-    read -r -p "Add them to NixOS and rebuild now? [Y/n/c=continue without them] " choice
+    read -r -p "Add/fix them in NixOS and rebuild now? [Y/n/c=continue] " choice
 
     case "${choice,,}" in
         c|continue)
-            echo "$NOTE Continuing without installing missing packages."
+            echo "$NOTE Continuing without fixing missing requirements."
             echo "-----"
             return 0
             ;;
         n|no)
-            echo "$NOTE Skipping installation of missing packages."
+            echo "$NOTE Skipping required package/service setup."
             echo "-----"
             return 0
             ;;
     esac
 
-    # Make sure configuration.nix exists.
     if [ ! -f "$config" ]; then
         echo "$ERROR $config does not exist."
         exit 1
     fi
 
-    echo "$CAT Adding missing packages to $config..."
+    echo "$CAT Updating $config..."
 
-    # Create environment.systemPackages if it does not exist.
-    if ! grep -q 'environment\.systemPackages' "$config"; then
-        cat <<'EOF' | sudo tee -a "$config" >/dev/null
+    # Add environment.systemPackages if necessary.
+    if [ "${#missing[@]}" -gt 0 ]; then
+        if ! grep -q 'environment\.systemPackages' "$config"; then
+            cat <<'EOF' | sudo tee -a "$config" >/dev/null
 
 environment.systemPackages = with pkgs; [
 ];
 EOF
+        fi
+
+        for pkg in "${missing[@]}"; do
+            if ! grep -qE "(^|[[:space:]])${pkg}([[:space:]]|$)" "$config"; then
+                sudo sed -i \
+                    "/environment\.systemPackages = with pkgs; \[/a\\    ${pkg}" \
+                    "$config"
+
+                echo "$OK Added $pkg."
+            else
+                echo "$NOTE $pkg is already in the NixOS configuration."
+            fi
+        done
     fi
 
-    # Add each missing package.
-    for pkg in "${missing[@]}"; do
-        if ! grep -qE "(^|[[:space:]])${pkg}([[:space:]]|$)" "$config"; then
-            sudo sed -i \
-                "/environment\.systemPackages = with pkgs; \[/a\\    ${pkg}" \
-                "$config"
+    # Enable fwupd system service.
+    if [ "$fwupd_configured" = false ]; then
+        echo "$CAT Enabling fwupd service..."
 
-            echo "$OK Added $pkg."
+        if ! grep -q 'services\.fwupd' "$config"; then
+            printf '\nservices.fwupd.enable = true;\n' | \
+                sudo tee -a "$config" >/dev/null
         else
-            echo "$NOTE $pkg is already in the NixOS configuration."
+            sudo sed -i \
+                's/services\.fwupd\.enable[[:space:]]*=[[:space:]]*false/services.fwupd.enable = true/' \
+                "$config"
         fi
-    done
+
+        echo "$OK fwupd service enabled in NixOS configuration."
+    fi
 
     echo
     echo "$CAT Rebuilding NixOS before continuing..."
@@ -138,7 +183,7 @@ EOF
 
     echo "$OK NixOS rebuild completed."
 
-    # Verify everything is available after the rebuild.
+    # Verify packages.
     for cmd in "${!packages[@]}"; do
         if ! command -v "$cmd" >/dev/null 2>&1; then
             echo "$ERROR $cmd is still unavailable after the rebuild."
@@ -146,9 +191,17 @@ EOF
         fi
     done
 
-    echo "$OK All required packages are installed and available."
+    # Verify fwupd daemon.
+    if ! systemctl is-active --quiet fwupd.service; then
+        echo "$ERROR fwupd daemon is still not running after the rebuild."
+        echo "$ERROR fwupdmgr will not work without fwupd.service."
+        exit 1
+    fi
+
+    echo "$OK All required packages and services are installed and available."
     echo "-----"
 }
+
 
 # Ensure required packages are available before continuing.
 ensure_required_packages
