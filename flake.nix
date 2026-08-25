@@ -35,320 +35,251 @@
     self,
     nixpkgs,
     nixpkgs-unstable,
-    ags,
     alejandra,
     ...
-  }:
-    let
-      # =====================================================================
-      # GLOBAL SYSTEM
-      # =====================================================================
+  }: let
+    # =======================================================================
+    # GLOBAL SYSTEM
+    # =======================================================================
 
-      system = "x86_64-linux";
+    system = "x86_64-linux";
 
-      # =====================================================================
-      # MACHINE-LOCAL HOST ROOT
-      #
-      # The Git repository contains only the centrally managed template:
-      #
-      #   hosts/default/
-      #
-      # Machine-specific files live outside the Git-tracked flake source:
-      #
-      #   .local-host/<hostname>/
-      #
-      # The installer exports:
-      #
-      #   NHL_LOCAL_HOST_ROOT=/absolute/path/to/repo/.local-host
-      #
-      # and invokes Nix with --impure.
-      #
-      # This is intentional. Git-backed flakes only expose tracked files to
-      # the flake evaluation store, so machine-local configuration cannot be
-      # discovered with builtins.readDir ./.
-      # =====================================================================
+    # =======================================================================
+    # MACHINE-LOCAL HOST DISCOVERY
+    #
+    # Central configuration:
+    #
+    #   hosts/default/
+    #
+    # Machine-specific configuration:
+    #
+    #   .local-host/<hostname>/
+    #
+    # The installer creates the machine-local directory.
+    #
+    # We deliberately DO NOT use:
+    #
+    #   builtins.getEnv "NHL_HOSTNAME"
+    #
+    # because Nix flake evaluation must not depend on shell environment
+    # variables.
+    # =======================================================================
 
-      localHostRoot =
-        let
-          root = builtins.getEnv "NHL_LOCAL_HOST_ROOT";
-        in
-          if root != ""
-          then root
-          else
-            throw ''
-              NHL_LOCAL_HOST_ROOT is not set.
+    localHostRoot = ./. + "/.local-host";
 
-              This installation uses machine-local host configuration.
+    localHostEntries =
+      if builtins.pathExists localHostRoot
+      then builtins.readDir localHostRoot
+      else {};
 
-              Expected environment variable:
+    localHostNames =
+      builtins.filter
+        (
+          name:
+            localHostEntries.${name} == "directory"
+            && name != "."
+            && name != ".."
+        )
+        (builtins.attrNames localHostEntries);
 
-                NHL_LOCAL_HOST_ROOT=/absolute/path/to/.local-host
+    # =======================================================================
+    # HOST IDENTITY
+    #
+    # Every machine-local host must contain:
+    #
+    #   .local-host/<hostname>/identity.json
+    #
+    # Example:
+    #
+    #   {
+    #     "username": "baka"
+    #   }
+    # =======================================================================
 
-              Example:
+    hostIdentity = host: let
+      hostDir = ./. + "/.local-host/${host}";
+      identityPath = hostDir + "/identity.json";
 
-                export NHL_LOCAL_HOST_ROOT="$PWD/.local-host"
-
-              Then evaluate the flake with:
-
-                nix --impure flake show
-
-              or:
-
-                nixos-rebuild switch --impure --flake .#<hostname>
-            '';
-
-      # =====================================================================
-      # MACHINE-LOCAL HOSTNAME
-      #
-      # The installer exports:
-      #
-      #   NHL_HOSTNAME=<hostname>
-      #
-      # We deliberately require it instead of automatically discovering every
-      # directory under .local-host/.
-      #
-      # This prevents one machine from accidentally exposing another machine's
-      # configuration as a NixOS configuration.
-      # =====================================================================
-
-      localHostName =
-        let
-          hostname = builtins.getEnv "NHL_HOSTNAME";
-        in
-          if hostname != ""
-          then hostname
-          else
-            throw ''
-              NHL_HOSTNAME is not set.
-
-              The installer must select a hostname before evaluating the
-              machine-local NixOS configuration.
-
-              Example:
-
-                export NHL_HOSTNAME=bakadesk-2657013e362a
-            '';
-
-      # =====================================================================
-      # MACHINE-LOCAL HOST DIRECTORY
-      # =====================================================================
-
-      hostDir =
-        builtins.toPath "${localHostRoot}/${localHostName}";
-
-      # =====================================================================
-      # MACHINE-LOCAL IDENTITY
-      #
-      # Expected:
-      #
-      #   .local-host/<hostname>/identity.json
-      #
-      # Example:
-      #
-      #   {
-      #     "username": "baka"
-      #   }
-      # =====================================================================
-
-      identityPath =
-        hostDir + "/identity.json";
-
-      hostIdentity =
+      identity =
         if builtins.pathExists identityPath
-        then
-          builtins.fromJSON (
-            builtins.readFile identityPath
-          )
-        else
-          throw ''
-            Machine-local host identity is missing.
-
-            Expected:
-
-              ${toString identityPath}
-
-            The installer must create identity.json before evaluating
-            this NixOS configuration.
-
-            Expected contents:
-
-              {
-                "username": "baka"
-              }
-          '';
-
+        then builtins.fromJSON (builtins.readFile identityPath)
+        else {};
+    in {
       username =
-        if hostIdentity ? username
-          && hostIdentity.username != null
-          && hostIdentity.username != ""
-        then
-          hostIdentity.username
-        else
-          throw ''
-            Machine-local host identity does not contain a valid username.
+        if identity ? username
+        && identity.username != null
+        && identity.username != ""
+        then identity.username
+        else throw ''
+          Host '${host}' is missing a username.
 
-            File:
+          Expected:
 
-              ${toString identityPath}
+            .local-host/${host}/identity.json
 
-            Expected:
+          containing for example:
 
-              {
-                "username": "baka"
-              }
-          '';
+            {
+              "username": "baka"
+            }
 
-      # =====================================================================
-      # PACKAGES
-      # =====================================================================
+          The installer must create identity.json before this host
+          can be evaluated.
+        '';
+    };
 
-      pkgs =
-        import nixpkgs {
-          inherit system;
+    # =======================================================================
+    # PACKAGES
+    # =======================================================================
 
-          config = {
-            allowUnfree = true;
-          };
-        };
+    pkgs = import nixpkgs {
+      inherit system;
 
-      pkgsUnstable =
-        import nixpkgs-unstable {
-          inherit system;
-
-          config = {
-            allowUnfree = true;
-          };
-        };
-
-      waybarWeatherPkg =
-        pkgs.callPackage ./pkgs/waybar-weather.nix {};
-
-      clawCodeLocalPkg =
-        pkgs.callPackage ./pkgs/claw-code-local.nix {};
-
-    in
-    {
-      # =====================================================================
-      # PACKAGES
-      # =====================================================================
-
-      packages.${system} = {
-        waybar-weather = waybarWeatherPkg;
-        claw-code-local = clawCodeLocalPkg;
+      config = {
+        allowUnfree = true;
       };
+    };
 
-      # =====================================================================
-      # NIXOS CONFIGURATION
-      #
-      # The machine-local config is the copy generated by the installer:
-      #
-      #   .local-host/<hostname>/config.nix
-      #
-      # That config imports its local siblings:
-      #
-      #   ./hardware.nix
-      #   ./users.nix
-      #   ./packages-fonts.nix
-      #   ./variables.nix
-      #
-      # Therefore the entire machine profile remains self-contained inside
-      # .local-host/<hostname>/.
-      # =====================================================================
+    pkgsUnstable = import nixpkgs-unstable {
+      inherit system;
 
-      nixosConfigurations = {
-        "${localHostName}" =
-          nixpkgs.lib.nixosSystem {
-            inherit system;
+      config = {
+        allowUnfree = true;
+      };
+    };
 
-            # ---------------------------------------------------------------
-            # Arguments available to all modules
-            # ---------------------------------------------------------------
+    waybarWeatherPkg =
+      pkgs.callPackage ./pkgs/waybar-weather.nix {};
 
-            specialArgs = {
-              inherit
-                inputs
-                system
-                username
-                pkgsUnstable
-                localHostName
-                hostDir;
+    clawCodeLocalPkg =
+      pkgs.callPackage ./pkgs/claw-code-local.nix {};
 
-              # Preserve the existing "host" argument expected by modules.
-              host = localHostName;
-            };
+  in {
+    # =======================================================================
+    # PACKAGES
+    # =======================================================================
 
-            # ---------------------------------------------------------------
-            # Modules
-            # ---------------------------------------------------------------
+    packages.${system} = {
+      waybar-weather = waybarWeatherPkg;
+      claw-code-local = clawCodeLocalPkg;
+    };
 
-            modules = [
-              # =============================================================
-              # MACHINE-LOCAL CONFIGURATION
-              # =============================================================
+    # =======================================================================
+    # NIXOS CONFIGURATIONS
+    #
+    # Every directory under:
+    #
+    #   .local-host/
+    #
+    # becomes:
+    #
+    #   nixosConfigurations.<hostname>
+    #
+    # Example:
+    #
+    #   .local-host/bakadesk-2657013e362a/
+    #
+    # becomes:
+    #
+    #   nixosConfigurations.bakadesk-2657013e362a
+    #
+    # hosts/default/ remains a template and is never directly instantiated.
+    # =======================================================================
 
-              "${toString hostDir}/config.nix"
+    nixosConfigurations =
+      builtins.listToAttrs (
+        map
+          (
+            host:
+              let
+                identity = hostIdentity host;
+                username = identity.username;
 
-              # =============================================================
-              # CENTRALLY MANAGED MODULES
-              # =============================================================
+                hostDir =
+                  ./. + "/.local-host/${host}";
+              in {
+                name = host;
 
-              ./modules/overlays.nix
-              ./modules/desktop
-              ./modules/packages.nix
-              ./modules/custom-ui
-              ./modules/tools
+                value = nixpkgs.lib.nixosSystem {
+                  inherit system;
 
-              {
-                nixpkgs.config.allowBroken = true;
-              }
+                  specialArgs = {
+                    inherit
+                      inputs
+                      username
+                      host
+                      pkgsUnstable;
+                  };
 
-              ./modules/fonts.nix
-              ./modules/security/default.nix
-              ./modules/entra
-              ./modules/power.nix
+                  modules = [
+                    # -------------------------------------------------------
+                    # MACHINE-LOCAL CONFIGURATION
+                    # -------------------------------------------------------
 
-              # =============================================================
-              # HOME MANAGER
-              # =============================================================
+                    (hostDir + "/config.nix")
 
-              inputs.home-manager.nixosModules.home-manager
+                    # -------------------------------------------------------
+                    # CENTRALLY MANAGED MODULES
+                    # -------------------------------------------------------
 
-              {
-                home-manager.useGlobalPkgs = true;
-                home-manager.useUserPackages = true;
+                    ./modules/overlays.nix
+                    ./modules/desktop
+                    ./modules/packages.nix
+                    ./modules/custom-ui
+                    ./modules/tools
 
-                home-manager.backupFileExtension = "hm-bak";
-                home-manager.overwriteBackup = true;
+                    {
+                      nixpkgs.config.allowBroken = true;
+                    }
 
-                home-manager.extraSpecialArgs = {
-                  inherit
-                    inputs
-                    system
-                    username
-                    hostDir;
+                    ./modules/fonts.nix
+                    ./modules/security/default.nix
+                    ./modules/entra
+                    ./modules/power.nix
 
-                  host = localHostName;
-                };
+                    # -------------------------------------------------------
+                    # HOME MANAGER
+                    # -------------------------------------------------------
 
-                home-manager.users.${username} = {
-                  home.username = username;
-                  home.homeDirectory = "/home/${username}";
-                  home.stateVersion = "24.05";
+                    inputs.home-manager.nixosModules.home-manager
 
-                  imports = [
-                    ./modules/home/default.nix
+                    {
+                      home-manager.useGlobalPkgs = true;
+                      home-manager.useUserPackages = true;
+
+                      home-manager.backupFileExtension = "hm-bak";
+                      home-manager.overwriteBackup = true;
+
+                      home-manager.extraSpecialArgs = {
+                        inherit
+                          inputs
+                          system
+                          username
+                          host;
+                      };
+
+                      home-manager.users.${username} = {
+                        home.username = username;
+                        home.homeDirectory = "/home/${username}";
+                        home.stateVersion = "24.05";
+
+                        imports = [
+                          ./modules/home/default.nix
+                        ];
+                      };
+                    }
                   ];
                 };
               }
-            ];
-          };
-      };
+          )
+          localHostNames
+      );
 
-      # =====================================================================
-      # FORMATTER
-      # =====================================================================
+    # =======================================================================
+    # FORMATTER
+    # =======================================================================
 
-      formatter.${system} =
-        alejandra.defaultPackage.${system};
-    };
+    formatter.${system} =
+      alejandra.defaultPackage.${system};
+  };
 }
