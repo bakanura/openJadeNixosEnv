@@ -238,8 +238,6 @@ nhl_prompt_hostname() {
       nhl_derive_hostname "${NHL_SELECTED_HOSTNAME_PREFIX}"
     )"
 
-    # stdout must contain ONLY the resulting hostname because callers use:
-    # hostName=$(nhl_prompt_hostname ...)
     printf "%s\n" "${NHL_SELECTED_HOSTNAME_VALUE}"
     return 0
   fi
@@ -266,7 +264,6 @@ nhl_prompt_hostname() {
       export NHL_SELECTED_HOSTNAME_MODE="custom"
       export NHL_SELECTED_HOSTNAME_VALUE="$custom"
 
-      # stdout: hostname ONLY
       printf "%s\n" "${NHL_SELECTED_HOSTNAME_VALUE}"
       return 0
     fi
@@ -275,9 +272,6 @@ nhl_prompt_hostname() {
       break
     fi
 
-    # IMPORTANT:
-    # This must go to stderr because the caller captures stdout:
-    #   hostName=$(nhl_prompt_hostname ...)
     printf '%s\n' \
       "[WARN] Please choose 's' for syntax + serial or 'u' for a unique hostname." \
       >&2
@@ -305,7 +299,6 @@ nhl_prompt_hostname() {
     nhl_derive_hostname "${NHL_SELECTED_HOSTNAME_PREFIX}"
   )"
 
-  # stdout: hostname ONLY
   printf "%s\n" "${NHL_SELECTED_HOSTNAME_VALUE}"
 }
 
@@ -313,15 +306,17 @@ nhl_preflight_install_repo() {
   local repoRoot="${1:-$(pwd)}"
   local missing=0
 
+  # hosts/default is the template and must remain the canonical
+  # source for default host configuration.
   for path in \
     flake.nix \
     install.sh \
     auto-install.sh \
-    .local-hosts/default/config.nix \
-    .local-hosts/default/variables.nix \
-    .local-hosts/default/users.nix \
-    .local-hosts/default/packages-fonts.nix \
-    .local-hosts/default/hardware.nix \
+    hosts/default/config.nix \
+    hosts/default/variables.nix \
+    hosts/default/users.nix \
+    hosts/default/packages-fonts.nix \
+    hosts/default/hardware.nix \
     scripts/lib/install-common.sh; do
 
     if [ ! -e "${repoRoot}/${path}" ]; then
@@ -343,8 +338,10 @@ nhl_preflight_fresh_install_target() {
   local hostName="$2"
   local hostDir="${repoRoot}/.local-hosts/${hostName}"
 
-  if [ ! -d "${repoRoot}/.local-hosts/default" ]; then
-    echo "[ERROR] Missing .local-hosts/default template directory."
+  # hosts/default is the template; .local-hosts/<hostname> is the
+  # generated host-specific target.
+  if [ ! -d "${repoRoot}/hosts/default" ]; then
+    echo "[ERROR] Missing hosts/default template directory."
     return 1
   fi
 
@@ -375,7 +372,6 @@ nhl_is_enrolled_device() {
     mid=$(cat /etc/machine-id 2>/dev/null || true)
   fi
 
-  # If no machine-id available, treat marker presence as enrolled.
   if [ -z "$mid" ]; then
     return 0
   fi
@@ -574,7 +570,9 @@ nhl_detect_gpu_and_toggle() {
   local hostName="$1"
   local cfg="./.local-hosts/$hostName/config.nix"
 
-  [ -f "$cfg" ] || cfg="./.local-hosts/default/config.nix"
+  # Host-specific config lives under .local-hosts.
+  # hosts/default/config.nix remains the template fallback.
+  [ -f "$cfg" ] || cfg="./hosts/default/config.nix"
 
   local has_vm=false
   local has_nvidia=false
@@ -597,7 +595,6 @@ nhl_detect_gpu_and_toggle() {
     done < <(lspci | grep -iE '(VGA|3D)')
   fi
 
-  # Decide detected profile.
   local detected=""
 
   if $has_vm; then
@@ -612,7 +609,6 @@ nhl_detect_gpu_and_toggle() {
     detected="intel"
   fi
 
-  # Confirm or manually choose profile.
   local profile="$detected"
 
   if [ -n "$detected" ]; then
@@ -629,7 +625,6 @@ nhl_detect_gpu_and_toggle() {
       "$default_profile")
   fi
 
-  # Reset toggles.
   sed -i \
     's/drivers\.amdgpu\.enable = [^;]*;/drivers.amdgpu.enable = false;/' \
     "$cfg" || true
@@ -650,7 +645,6 @@ nhl_detect_gpu_and_toggle() {
     's/vm\.guest-services\.enable = [^;]*;/vm.guest-services.enable = false;/' \
     "$cfg" || true
 
-  # Apply selected profile.
   case "$profile" in
     vm)
       sed -i \
@@ -687,35 +681,12 @@ nhl_detect_gpu_and_toggle() {
       ;;
 
     *)
-      # Fallback: do nothing if unknown.
       ;;
   esac
 
   export NHL_GPU_PROFILE="$profile"
 }
 
-# Safely apply a sed transformation to a file.
-#
-# This deliberately does NOT use:
-#
-#   sudo sed -i ...
-#
-# directly on /etc/nixos/configuration.nix.
-#
-# sed -i needs to create a temporary file next to the target, which can
-# fail with errors such as:
-#
-#   couldn't open temporary file /etc/nixos/sedXXXXXX
-#
-# This helper instead:
-#
-#   1. Creates the temporary file in /tmp.
-#   2. Runs sed against the original file.
-#   3. Installs the result back with sudo.
-#
-# Args:
-#   $1 = file
-#   $2... = sed arguments
 nhl_sed_file() {
   local file="$1"
   shift
@@ -735,7 +706,6 @@ nhl_sed_file() {
     return 1
   }
 
-  # Preserve the existing mode/ownership where possible.
   mode=$(stat -c '%a' "$file" 2>/dev/null || true)
   owner=$(stat -c '%u' "$file" 2>/dev/null || true)
   group=$(stat -c '%g' "$file" 2>/dev/null || true)
@@ -773,7 +743,6 @@ nhl_sed_file() {
 }
 
 nhl_insert_option_before_closing_brace() {
-  # Args: $1 = file, $2 = full option line (including trailing ;)
   local file="$1"
   local line="$2"
   local last_brace_line
@@ -794,8 +763,6 @@ nhl_insert_option_before_closing_brace() {
     return 1
   fi
 
-  # Do not use sed -i directly on /etc/nixos files.
-  # Build the result in /tmp and install it back safely.
   local tmp=""
   local mode=""
   local owner=""
@@ -851,7 +818,6 @@ nhl_insert_option_before_closing_brace() {
 }
 
 nhl_lookup_timezone_from_city() {
-  # Args: $1 = city
   local city="$1"
   local encoded=""
   local resp=""
@@ -862,7 +828,6 @@ nhl_lookup_timezone_from_city() {
     return 1
   fi
 
-  # Minimal URL encoding for common city input.
   encoded=$(printf "%s" "$city" |
     sed -e 's/%/%25/g' -e 's/ /%20/g')
 
@@ -884,7 +849,6 @@ nhl_lookup_timezone_from_city() {
 }
 
 nhl_detect_timezone_auto() {
-  # Try local system timezone first, then IP-based lookup.
   local tz=""
 
   if command -v timedatectl >/dev/null 2>&1; then
@@ -921,7 +885,7 @@ nhl_prompt_timezone_console() {
   local defKb="${2:-us}"
   local cfg="./.local-hosts/$hostName/config.nix"
 
-  [ -f "$cfg" ] || cfg="./.local-hosts/default/config.nix"
+  [ -f "$cfg" ] || cfg="./hosts/default/config.nix"
 
   local timeZone=""
   local city=""
@@ -955,7 +919,6 @@ nhl_prompt_timezone_console() {
   fi
 
   if [ -n "$timeZone" ]; then
-    # Set explicit timezone and disable automatic.
     if grep -q 'time\.timeZone' "$cfg"; then
       nhl_sed_file \
         "$cfg" \
@@ -976,7 +939,6 @@ nhl_prompt_timezone_console() {
         "services.automatic-timezoned.enable = false;"
     fi
   else
-    # Prefer automatic time zone if still unknown.
     if grep -q 'services\.automatic-timezoned\.enable' "$cfg"; then
       nhl_sed_file \
         "$cfg" \
@@ -987,13 +949,11 @@ nhl_prompt_timezone_console() {
         "services.automatic-timezoned.enable = true;"
     fi
 
-    # Remove explicit time.timeZone if present.
     nhl_sed_file \
       "$cfg" \
       -e '/time\.timeZone[[:space:]]*=/{d}' || true
   fi
 
-  # Console keymap follows chosen keyboard layout by default.
   local consoleKeyMap="${NHL_STATE_CONSOLE_KEYMAP:-$defKb}"
 
   if grep -q 'console\.keyMap' "$cfg"; then
@@ -1065,7 +1025,6 @@ nhl_ensure_required_packages() {
   local fwupd_configured=false
   local fwupd_functional=false
 
-  # command -> NixOS package
   declare -A packages=(
     [git]="git"
     [lspci]="pciutils"
@@ -1084,9 +1043,6 @@ nhl_ensure_required_packages() {
     fi
   done
 
-  # ------------------------------------------------------------
-  # Check NixOS fwupd configuration.
-  # ------------------------------------------------------------
   if grep -qE \
     'services\.fwupd\.enable[[:space:]]*=[[:space:]]*true[[:space:]]*;' \
     "$config" 2>/dev/null; then
@@ -1158,6 +1114,7 @@ nhl_ensure_required_packages() {
   echo "[ACTION] Updating $config..."
 
   if [ "${#missing[@]}" -gt 0 ]; then
+
     if ! grep -q 'environment\.systemPackages' "$config"; then
       cat <<'EOF' | sudo tee -a "$config" >/dev/null
 
@@ -1287,7 +1244,7 @@ nhl_prompt_fingerprint() {
   local hostName="$1"
   local cfg="./.local-hosts/$hostName/config.nix"
 
-  [ -f "$cfg" ] || cfg="./.local-hosts/default/config.nix"
+  [ -f "$cfg" ] || cfg="./hosts/default/config.nix"
 
   local enable_fp
   local default_prompt="(y/N)"
@@ -1338,7 +1295,7 @@ nhl_prompt_vscode_confirm_sync() {
   local hostName="$1"
   local vars="./.local-hosts/$hostName/variables.nix"
 
-  [ -f "$vars" ] || vars="./.local-hosts/default/variables.nix"
+  [ -f "$vars" ] || vars="./hosts/default/variables.nix"
 
   local default_prompt="(y/N)"
   local default_value="n"
@@ -1419,9 +1376,6 @@ nhl_enroll_fingerprint() {
 }
 
 nhl_prompt_firmware_updates() {
-  # Optional pre-install firmware inspection/update helper.
-  # Package/service setup is handled centrally by nhl_ensure_required_packages.
-
   if ! nhl_yes_no \
     "Check firmware updates with fwupd before continuing? (y/N): "; then
     return 0
@@ -1475,8 +1429,10 @@ nhl_host_config_path() {
   local hostName="$1"
   local cfg="./.local-hosts/$hostName/config.nix"
 
+  # .local-hosts contains generated host-specific configuration.
+  # hosts/default remains the canonical template fallback.
   if [ ! -f "$cfg" ]; then
-    cfg="./.local-hosts/default/config.nix"
+    cfg="./hosts/default/config.nix"
   fi
 
   printf "%s\n" "$cfg"
@@ -1488,7 +1444,7 @@ nhl_host_hardware_path() {
   local hw="./.local-hosts/$hostName/hardware.nix"
 
   if [ ! -f "$hw" ]; then
-    hw="./.local-hosts/default/hardware.nix"
+    hw="./hosts/default/hardware.nix"
   fi
 
   printf "%s\n" "$hw"
@@ -1556,7 +1512,6 @@ nhl_patch_host_for_tpm_unlock() {
   [ -f "$cfg" ] || return 1
   [ -n "$luksName" ] || return 1
 
-  # Remove TPM mask if present, otherwise TPM-based unlock cannot work.
   nhl_sed_file \
     "$cfg" \
     -e '/systemd\.mask=dev-tpmrm0\.device/d' || true
@@ -1781,12 +1736,13 @@ nhl_run_luks_tpm_enrollment() {
     sha512sum |
     awk '{print $1}')
 
+  # Recovery hashes belong with generated host-specific state.
   hashFile="./.local-hosts/$hostName/.luks-recovery-key.sha256"
   hashFile512="./.local-hosts/$hostName/.luks-recovery-key.sha512"
 
-  mkdir -p "./.local-hosts/$hostName"
-
   umask 077
+
+  mkdir -p "./.local-hosts/$hostName"
 
   cat >"$hashFile" <<EOF
 device=$luksDevice
