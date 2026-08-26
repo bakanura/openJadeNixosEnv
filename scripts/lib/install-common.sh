@@ -29,7 +29,7 @@ nhl_patch_flake_identity() {
   local repoRoot="$1"
   local hostName="$2"
   local installUsername="$3"
-  local identityFile="${repoRoot}/hosts/${hostName}/identity.json"
+  local identityFile="${repoRoot}/.local-hosts/${hostName}/identity.json"
 
   # Safety check: do not overwrite a real user with the bootstrap fallback if the file already exists.
   if [ "$installUsername" = "nixos-bootstrap" ] && [ -f "$identityFile" ]; then
@@ -213,6 +213,7 @@ nhl_derive_hostname() {
 
   printf "%s\n" "$hostName"
 }
+
 nhl_prompt_hostname() {
   local default_prefix="${1:-NixOS}"
   local serial=""
@@ -232,10 +233,10 @@ nhl_prompt_hostname() {
     export NHL_SELECTED_HOSTNAME_MODE="prefix-serial"
     export NHL_SELECTED_HOSTNAME_PREFIX="$(
       nhl_sanitize_hostname "${NHL_STATE_HOSTNAME_PREFIX:-$default_prefix}"
-    )
+    )"
     export NHL_SELECTED_HOSTNAME_VALUE="$(
       nhl_derive_hostname "${NHL_SELECTED_HOSTNAME_PREFIX}"
-    )
+    )"
 
     # stdout must contain ONLY the resulting hostname because callers use:
     # hostName=$(nhl_prompt_hostname ...)
@@ -316,11 +317,11 @@ nhl_preflight_install_repo() {
     flake.nix \
     install.sh \
     auto-install.sh \
-    hosts/default/config.nix \
-    hosts/default/variables.nix \
-    hosts/default/users.nix \
-    hosts/default/packages-fonts.nix \
-    hosts/default/hardware.nix \
+    .local-hosts/default/config.nix \
+    .local-hosts/default/variables.nix \
+    .local-hosts/default/users.nix \
+    .local-hosts/default/packages-fonts.nix \
+    .local-hosts/default/hardware.nix \
     scripts/lib/install-common.sh; do
 
     if [ ! -e "${repoRoot}/${path}" ]; then
@@ -340,10 +341,10 @@ nhl_preflight_fresh_install_target() {
   # Args: $1 = repo root, $2 = hostName
   local repoRoot="$1"
   local hostName="$2"
-  local hostDir="${repoRoot}/hosts/${hostName}"
+  local hostDir="${repoRoot}/.local-hosts/${hostName}"
 
-  if [ ! -d "${repoRoot}/hosts/default" ]; then
-    echo "[ERROR] Missing hosts/default template directory."
+  if [ ! -d "${repoRoot}/.local-hosts/default" ]; then
+    echo "[ERROR] Missing .local-hosts/default template directory."
     return 1
   fi
 
@@ -363,7 +364,7 @@ nhl_preflight_fresh_install_target() {
 nhl_is_enrolled_device() {
   # Args: $1 = hostName
   local hostName="$1"
-  local marker="./hosts/$hostName/.nhl-enrolled"
+  local marker="./.local-hosts/$hostName/.nhl-enrolled"
   local mid=""
 
   if [ ! -f "$marker" ]; then
@@ -389,7 +390,7 @@ nhl_is_enrolled_device() {
 nhl_mark_device_enrolled() {
   # Args: $1 = hostName
   local hostName="$1"
-  local marker="./hosts/$hostName/.nhl-enrolled"
+  local marker="./.local-hosts/$hostName/.nhl-enrolled"
   local mid=""
   local serial=""
 
@@ -401,7 +402,7 @@ nhl_mark_device_enrolled() {
     serial=$(tr -d '[:space:]' </sys/class/dmi/id/product_serial 2>/dev/null || true)
   fi
 
-  mkdir -p "./hosts/$hostName"
+  mkdir -p "./.local-hosts/$hostName"
 
   cat >"$marker" <<EOF
 machine_id=$mid
@@ -414,7 +415,7 @@ nhl_state_file() {
   # Args: $1 = hostName
   local hostName="$1"
 
-  printf "./hosts/%s/.installer-state.json\n" "$hostName"
+  printf "./.local-hosts/%s/.installer-state.json\n" "$hostName"
 }
 
 nhl_load_installer_state() {
@@ -544,7 +545,7 @@ nhl_save_installer_state() {
 
   stateFile=$(nhl_state_file "$hostName")
 
-  mkdir -p "./hosts/$hostName"
+  mkdir -p "./.local-hosts/$hostName"
 
   if [ "$fingerprintEnabled" = "1" ] ||
      [ "$fingerprintEnabled" = "true" ]; then
@@ -571,9 +572,9 @@ EOF
 nhl_detect_gpu_and_toggle() {
   # Args: $1 = hostName
   local hostName="$1"
-  local cfg="./hosts/$hostName/config.nix"
+  local cfg="./.local-hosts/$hostName/config.nix"
 
-  [ -f "$cfg" ] || cfg="./hosts/default/config.nix"
+  [ -f "$cfg" ] || cfg="./.local-hosts/default/config.nix"
 
   local has_vm=false
   local has_nvidia=false
@@ -918,9 +919,9 @@ nhl_prompt_timezone_console() {
   # Args: $1 = hostName, $2 = defaultKeyboardLayout
   local hostName="$1"
   local defKb="${2:-us}"
-  local cfg="./hosts/$hostName/config.nix"
+  local cfg="./.local-hosts/$hostName/config.nix"
 
-  [ -f "$cfg" ] || cfg="./hosts/default/config.nix"
+  [ -f "$cfg" ] || cfg="./.local-hosts/default/config.nix"
 
   local timeZone=""
   local city=""
@@ -1086,20 +1087,6 @@ nhl_ensure_required_packages() {
   # ------------------------------------------------------------
   # Check NixOS fwupd configuration.
   # ------------------------------------------------------------
-  #
-  # IMPORTANT:
-  #
-  # fwupd.service does not need to remain continuously active.
-  # fwupd can be activated on demand through the system service/D-Bus.
-  #
-  # Therefore:
-  #
-  #   systemctl is-active fwupd.service
-  #
-  # is NOT a valid requirement by itself.
-  #
-  # The real test is whether fwupdmgr can communicate with fwupd.
-  # ------------------------------------------------------------
   if grep -qE \
     'services\.fwupd\.enable[[:space:]]*=[[:space:]]*true[[:space:]]*;' \
     "$config" 2>/dev/null; then
@@ -1118,7 +1105,6 @@ nhl_ensure_required_packages() {
     fi
   fi
 
-  # All commands plus functional fwupd are good.
   if [ "${#missing[@]}" -eq 0 ] &&
      [ "$fwupd_configured" = true ] &&
      [ "$fwupd_functional" = true ]; then
@@ -1171,11 +1157,7 @@ nhl_ensure_required_packages() {
 
   echo "[ACTION] Updating $config..."
 
-  # ------------------------------------------------------------
-  # Add missing packages to environment.systemPackages.
-  # ------------------------------------------------------------
   if [ "${#missing[@]}" -gt 0 ]; then
-
     if ! grep -q 'environment\.systemPackages' "$config"; then
       cat <<'EOF' | sudo tee -a "$config" >/dev/null
 
@@ -1189,7 +1171,6 @@ EOF
         "^[[:space:]]*${pkg}[[:space:]]*$" \
         "$config"; then
 
-        # Do not use sed -i directly against /etc/nixos.
         local tmp=""
         local mode=""
         local owner=""
@@ -1248,9 +1229,6 @@ EOF
     done
   fi
 
-  # ------------------------------------------------------------
-  # Enable fwupd INSIDE the Nix configuration attribute set.
-  # ------------------------------------------------------------
   if [ "$fwupd_configured" = false ]; then
     echo "[ACTION] Enabling fwupd service..."
 
@@ -1283,9 +1261,6 @@ EOF
 
   echo "[OK] NixOS rebuild completed."
 
-  # ------------------------------------------------------------
-  # Verify commands after rebuild.
-  # ------------------------------------------------------------
   for cmd in "${!packages[@]}"; do
     if ! command -v "$cmd" >/dev/null 2>&1; then
       echo "[ERROR] $cmd is still unavailable after the rebuild."
@@ -1293,20 +1268,6 @@ EOF
     fi
   done
 
-  # ------------------------------------------------------------
-  # Verify fwupd AFTER rebuild.
-  # ------------------------------------------------------------
-  #
-  # Do NOT require:
-  #
-  #   systemctl is-active fwupd.service
-  #
-  # because fwupd may be inactive/dead when idle and still be
-  # completely functional through activation when fwupdmgr asks
-  # for the daemon.
-  #
-  # Instead, ask fwupdmgr to enumerate devices.
-  # ------------------------------------------------------------
   echo "[ACTION] Verifying fwupd daemon connectivity..."
 
   if sudo fwupdmgr get-devices >/dev/null 2>&1; then
@@ -1324,9 +1285,9 @@ EOF
 nhl_prompt_fingerprint() {
   # Args: $1 = hostName
   local hostName="$1"
-  local cfg="./hosts/$hostName/config.nix"
+  local cfg="./.local-hosts/$hostName/config.nix"
 
-  [ -f "$cfg" ] || cfg="./hosts/default/config.nix"
+  [ -f "$cfg" ] || cfg="./.local-hosts/default/config.nix"
 
   local enable_fp
   local default_prompt="(y/N)"
@@ -1375,9 +1336,9 @@ nhl_prompt_fingerprint() {
 nhl_prompt_vscode_confirm_sync() {
   # Args: $1 = hostName
   local hostName="$1"
-  local vars="./hosts/$hostName/variables.nix"
+  local vars="./.local-hosts/$hostName/variables.nix"
 
-  [ -f "$vars" ] || vars="./hosts/default/variables.nix"
+  [ -f "$vars" ] || vars="./.local-hosts/default/variables.nix"
 
   local default_prompt="(y/N)"
   local default_value="n"
@@ -1472,12 +1433,6 @@ nhl_prompt_firmware_updates() {
     return 0
   fi
 
-  # ------------------------------------------------------------
-  # Do NOT require fwupd.service to be active here.
-  #
-  # fwupd can be socket/D-Bus activated. An inactive/dead service
-  # while idle is normal. The real test is whether fwupdmgr works.
-  # ------------------------------------------------------------
   echo "${INFO} Testing fwupd daemon connectivity..."
 
   if ! sudo fwupdmgr get-devices >/dev/null 2>&1; then
@@ -1518,10 +1473,10 @@ nhl_prompt_firmware_updates() {
 nhl_host_config_path() {
   # Args: $1 = hostName
   local hostName="$1"
-  local cfg="./hosts/$hostName/config.nix"
+  local cfg="./.local-hosts/$hostName/config.nix"
 
   if [ ! -f "$cfg" ]; then
-    cfg="./hosts/default/config.nix"
+    cfg="./.local-hosts/default/config.nix"
   fi
 
   printf "%s\n" "$cfg"
@@ -1530,10 +1485,10 @@ nhl_host_config_path() {
 nhl_host_hardware_path() {
   # Args: $1 = hostName
   local hostName="$1"
-  local hw="./hosts/$hostName/hardware.nix"
+  local hw="./.local-hosts/$hostName/hardware.nix"
 
   if [ ! -f "$hw" ]; then
-    hw="./hosts/default/hardware.nix"
+    hw="./.local-hosts/default/hardware.nix"
   fi
 
   printf "%s\n" "$hw"
@@ -1826,8 +1781,10 @@ nhl_run_luks_tpm_enrollment() {
     sha512sum |
     awk '{print $1}')
 
-  hashFile="./hosts/$hostName/.luks-recovery-key.sha256"
-  hashFile512="./hosts/$hostName/.luks-recovery-key.sha512"
+  hashFile="./.local-hosts/$hostName/.luks-recovery-key.sha256"
+  hashFile512="./.local-hosts/$hostName/.luks-recovery-key.sha512"
+
+  mkdir -p "./.local-hosts/$hostName"
 
   umask 077
 
@@ -1873,7 +1830,7 @@ nhl_print_recovery_key_and_confirm() {
   printf "%s\n" "${recoveryKey}"
   printf "%s\n" "SHA-256: ${sha256}"
   printf "%s\n" "SHA-512: ${sha512}"
-  printf "%s\n" "Hash copies saved under hosts/<hostname>/.luks-recovery-key.sha{256,512}"
+  printf "%s\n" "Hash copies saved under .local-hosts/<hostname>/.luks-recovery-key.sha{256,512}"
   printf "%s\n" "-----"
 
   if ! nhl_yes_no "Are u sure you saved this recovery key? (y/N): "; then
