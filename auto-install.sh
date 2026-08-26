@@ -353,7 +353,7 @@ echo "-----"
 # KEYBOARD LAYOUT
 # ===========================================================================
 
-keyboardDefault="${NHL_STATE_KEYBOARD_LAYOUT:-de}"
+keyboardDefault="${NHL_STATE_KEYBOARD_LAYOUT:-de-latin1}"
 
 if ! command -v loadkeys >/dev/null 2>&1; then
     echo "${ERROR} loadkeys is required to validate keyboard layouts."
@@ -382,28 +382,20 @@ while true; do
 
     fi
 
-    # Keyboard layouts are XKB/console layout identifiers.
-    # Restrict input to the conventional lowercase layout identifier form.
-    if [[ ! "$keyboardLayout" =~ ^[a-z0-9_+-]+$ ]]; then
+    keyboardLayout="${keyboardLayout,,}"
 
-        echo "${WARN} Invalid keyboard layout identifier: '$keyboardLayout'"
-        echo "${NOTE} Enter a valid layout such as: de, us, gb, fr, it, es"
-        continue
+    # loadkeys is the authoritative source for installed console keymaps.
+    # --parse validates and resolves the keymap without loading it.
+    if loadkeys --parse "$keyboardLayout" >/dev/null 2>&1; then
 
-    fi
-
-    # loadkeys --parse resolves and parses the keymap without loading it.
-    # This verifies that the supplied layout is actually available.
-    if ! loadkeys --parse "$keyboardLayout" >/dev/null 2>&1; then
-
-        echo "${WARN} Keyboard layout '$keyboardLayout' could not be verified by loadkeys."
-        echo "${NOTE} Enter an installed layout such as: de, us, gb, fr, it, es"
-        continue
+        echo "$OK Keyboard layout verified by loadkeys: $keyboardLayout"
+        break
 
     fi
 
-    echo "$OK Keyboard layout verified by loadkeys: $keyboardLayout"
-    break
+    echo "${WARN} Keyboard layout '$keyboardLayout' could not be verified by loadkeys."
+    echo "${NOTE} Enter a keymap provided by the installed kbd package."
+    echo "${NOTE} Examples include: de-latin1, de, us, uk, fr, it, es, ru"
 
 done
 
@@ -432,7 +424,6 @@ else
 fi
 
 echo "$OK Keyboard layout configured: $keyboardLayout"
-
 
 # ===========================================================================
 # TIMEZONE / CONSOLE KEYMAP
