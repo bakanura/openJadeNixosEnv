@@ -1,6 +1,10 @@
 #!/usr/bin/env bash
 # Common installer helpers for NixOS-Hyprland
 # Sourced by install.sh and auto-install.sh
+#
+# Host path model:
+#   hosts/default/              = permanent template
+#   .local-hosts/<hostname>/   = generated/current host
 
 nhl_repo_root() {
   if [ -n "${NHL_REPO_ROOT:-}" ] && [ -d "${NHL_REPO_ROOT}" ]; then
@@ -306,8 +310,6 @@ nhl_preflight_install_repo() {
   local repoRoot="${1:-$(pwd)}"
   local missing=0
 
-  # hosts/default is the template and must remain the canonical
-  # source for default host configuration.
   for path in \
     flake.nix \
     install.sh \
@@ -338,8 +340,6 @@ nhl_preflight_fresh_install_target() {
   local hostName="$2"
   local hostDir="${repoRoot}/.local-hosts/${hostName}"
 
-  # hosts/default is the template; .local-hosts/<hostname> is the
-  # generated host-specific target.
   if [ ! -d "${repoRoot}/hosts/default" ]; then
     echo "[ERROR] Missing hosts/default template directory."
     return 1
@@ -386,7 +386,8 @@ nhl_is_enrolled_device() {
 nhl_mark_device_enrolled() {
   # Args: $1 = hostName
   local hostName="$1"
-  local marker="./.local-hosts/$hostName/.nhl-enrolled"
+  local hostDir="./.local-hosts/$hostName"
+  local marker="${hostDir}/.nhl-enrolled"
   local mid=""
   local serial=""
 
@@ -398,7 +399,7 @@ nhl_mark_device_enrolled() {
     serial=$(tr -d '[:space:]' </sys/class/dmi/id/product_serial 2>/dev/null || true)
   fi
 
-  mkdir -p "./.local-hosts/$hostName"
+  mkdir -p "$hostDir"
 
   cat >"$marker" <<EOF
 machine_id=$mid
@@ -568,11 +569,9 @@ EOF
 nhl_detect_gpu_and_toggle() {
   # Args: $1 = hostName
   local hostName="$1"
-  local cfg="./.local-hosts/$hostName/config.nix"
+  local cfg=""
 
-  # Host-specific config lives under .local-hosts.
-  # hosts/default/config.nix remains the template fallback.
-  [ -f "$cfg" ] || cfg="./hosts/default/config.nix"
+  cfg=$(nhl_host_config_path "$hostName")
 
   local has_vm=false
   local has_nvidia=false
@@ -625,59 +624,59 @@ nhl_detect_gpu_and_toggle() {
       "$default_profile")
   fi
 
-  sed -i \
-    's/drivers\.amdgpu\.enable = [^;]*;/drivers.amdgpu.enable = false;/' \
-    "$cfg" || true
+  nhl_sed_file \
+    "$cfg" \
+    -e 's/drivers\.amdgpu\.enable = [^;]*;/drivers.amdgpu.enable = false;/' || true
 
-  sed -i \
-    's/drivers\.intel\.enable = [^;]*;/drivers.intel.enable = false;/' \
-    "$cfg" || true
+  nhl_sed_file \
+    "$cfg" \
+    -e 's/drivers\.intel\.enable = [^;]*;/drivers.intel.enable = false;/' || true
 
-  sed -i \
-    's/drivers\.nvidia\.enable = [^;]*;/drivers.nvidia.enable = false;/' \
-    "$cfg" || true
+  nhl_sed_file \
+    "$cfg" \
+    -e 's/drivers\.nvidia\.enable = [^;]*;/drivers.nvidia.enable = false;/' || true
 
-  sed -i \
-    's/drivers\.nvidia-prime\.enable = [^;]*;/drivers.nvidia-prime.enable = false;/' \
-    "$cfg" || true
+  nhl_sed_file \
+    "$cfg" \
+    -e 's/drivers\.nvidia-prime\.enable = [^;]*;/drivers.nvidia-prime.enable = false;/' || true
 
-  sed -i \
-    's/vm\.guest-services\.enable = [^;]*;/vm.guest-services.enable = false;/' \
-    "$cfg" || true
+  nhl_sed_file \
+    "$cfg" \
+    -e 's/vm\.guest-services\.enable = [^;]*;/vm.guest-services.enable = false;/' || true
 
   case "$profile" in
     vm)
-      sed -i \
-        's/vm\.guest-services\.enable = [^;]*;/vm.guest-services.enable = true;/' \
-        "$cfg" || true
+      nhl_sed_file \
+        "$cfg" \
+        -e 's/vm\.guest-services\.enable = [^;]*;/vm.guest-services.enable = true;/' || true
       ;;
 
     nvidia-laptop)
-      sed -i \
-        's/drivers\.nvidia-prime\.enable = [^;]*;/drivers.nvidia-prime.enable = true;/' \
-        "$cfg" || true
+      nhl_sed_file \
+        "$cfg" \
+        -e 's/drivers\.nvidia-prime\.enable = [^;]*;/drivers.nvidia-prime.enable = true;/' || true
 
-      sed -i \
-        's/drivers\.intel\.enable = [^;]*;/drivers.intel.enable = true;/' \
-        "$cfg" || true
+      nhl_sed_file \
+        "$cfg" \
+        -e 's/drivers\.intel\.enable = [^;]*;/drivers.intel.enable = true;/' || true
       ;;
 
     nvidia)
-      sed -i \
-        's/drivers\.nvidia\.enable = [^;]*;/drivers.nvidia.enable = true;/' \
-        "$cfg" || true
+      nhl_sed_file \
+        "$cfg" \
+        -e 's/drivers\.nvidia\.enable = [^;]*;/drivers.nvidia.enable = true;/' || true
       ;;
 
     amd)
-      sed -i \
-        's/drivers\.amdgpu\.enable = [^;]*;/drivers.amdgpu.enable = true;/' \
-        "$cfg" || true
+      nhl_sed_file \
+        "$cfg" \
+        -e 's/drivers\.amdgpu\.enable = [^;]*;/drivers.amdgpu.enable = true;/' || true
       ;;
 
     intel)
-      sed -i \
-        's/drivers\.intel\.enable = [^;]*;/drivers.intel.enable = true;/' \
-        "$cfg" || true
+      nhl_sed_file \
+        "$cfg" \
+        -e 's/drivers\.intel\.enable = [^;]*;/drivers.intel.enable = true;/' || true
       ;;
 
     *)
@@ -743,6 +742,7 @@ nhl_sed_file() {
 }
 
 nhl_insert_option_before_closing_brace() {
+  # Args: $1 = file, $2 = full option line (including trailing ;)
   local file="$1"
   local line="$2"
   local last_brace_line
@@ -818,6 +818,7 @@ nhl_insert_option_before_closing_brace() {
 }
 
 nhl_lookup_timezone_from_city() {
+  # Args: $1 = city
   local city="$1"
   local encoded=""
   local resp=""
@@ -883,9 +884,9 @@ nhl_prompt_timezone_console() {
   # Args: $1 = hostName, $2 = defaultKeyboardLayout
   local hostName="$1"
   local defKb="${2:-us}"
-  local cfg="./.local-hosts/$hostName/config.nix"
+  local cfg=""
 
-  [ -f "$cfg" ] || cfg="./hosts/default/config.nix"
+  cfg=$(nhl_host_config_path "$hostName")
 
   local timeZone=""
   local city=""
@@ -1114,7 +1115,6 @@ nhl_ensure_required_packages() {
   echo "[ACTION] Updating $config..."
 
   if [ "${#missing[@]}" -gt 0 ]; then
-
     if ! grep -q 'environment\.systemPackages' "$config"; then
       cat <<'EOF' | sudo tee -a "$config" >/dev/null
 
@@ -1242,9 +1242,9 @@ EOF
 nhl_prompt_fingerprint() {
   # Args: $1 = hostName
   local hostName="$1"
-  local cfg="./.local-hosts/$hostName/config.nix"
+  local cfg=""
 
-  [ -f "$cfg" ] || cfg="./hosts/default/config.nix"
+  cfg=$(nhl_host_config_path "$hostName")
 
   local enable_fp
   local default_prompt="(y/N)"
@@ -1293,9 +1293,9 @@ nhl_prompt_fingerprint() {
 nhl_prompt_vscode_confirm_sync() {
   # Args: $1 = hostName
   local hostName="$1"
-  local vars="./.local-hosts/$hostName/variables.nix"
+  local vars=""
 
-  [ -f "$vars" ] || vars="./hosts/default/variables.nix"
+  vars=$(nhl_host_variables_path "$hostName")
 
   local default_prompt="(y/N)"
   local default_value="n"
@@ -1429,13 +1429,23 @@ nhl_host_config_path() {
   local hostName="$1"
   local cfg="./.local-hosts/$hostName/config.nix"
 
-  # .local-hosts contains generated host-specific configuration.
-  # hosts/default remains the canonical template fallback.
   if [ ! -f "$cfg" ]; then
     cfg="./hosts/default/config.nix"
   fi
 
   printf "%s\n" "$cfg"
+}
+
+nhl_host_variables_path() {
+  # Args: $1 = hostName
+  local hostName="$1"
+  local vars="./.local-hosts/$hostName/variables.nix"
+
+  if [ ! -f "$vars" ]; then
+    vars="./hosts/default/variables.nix"
+  fi
+
+  printf "%s\n" "$vars"
 }
 
 nhl_host_hardware_path() {
@@ -1458,7 +1468,12 @@ nhl_extract_luks_name_from_hardware() {
 
   hw=$(nhl_host_hardware_path "$hostName")
 
-  [ -f "$hw" ] || return 1
+  if [ ! -f "$hw" ]; then
+    echo "[ERROR] Hardware config not found for host '${hostName}'." >&2
+    echo "[ERROR] Checked generated host: ./.local-hosts/${hostName}/hardware.nix" >&2
+    echo "[ERROR] Checked template: ./hosts/default/hardware.nix" >&2
+    return 1
+  fi
 
   name=$(
     sed -n \
@@ -1483,7 +1498,12 @@ nhl_extract_luks_device_from_hardware() {
 
   hw=$(nhl_host_hardware_path "$hostName")
 
-  [ -f "$hw" ] || return 1
+  if [ ! -f "$hw" ]; then
+    echo "[ERROR] Hardware config not found for host '${hostName}'." >&2
+    echo "[ERROR] Checked generated host: ./.local-hosts/${hostName}/hardware.nix" >&2
+    echo "[ERROR] Checked template: ./hosts/default/hardware.nix" >&2
+    return 1
+  fi
 
   dev=$(
     sed -n \
@@ -1573,11 +1593,28 @@ nhl_prompt_luks_tpm_setup() {
     return 0
   fi
 
+  # IMPORTANT:
+  # These helpers now resolve:
+  #
+  #   .local-hosts/<hostName>/hardware.nix
+  #
+  # first, and only fall back to:
+  #
+  #   hosts/default/hardware.nix
+  #
+  # This is critical because .local-hosts contains the generated host
+  # hardware after the initial template clone.
   luksDevice=$(nhl_extract_luks_device_from_hardware "$hostName" || true)
   luksName=$(nhl_extract_luks_name_from_hardware "$hostName" || true)
 
   if [ -z "$luksDevice" ] || [ -z "$luksName" ]; then
+    local resolvedHardware=""
+    resolvedHardware=$(nhl_host_hardware_path "$hostName")
+
     echo "${WARN} No LUKS root mapping was found in host hardware config."
+    echo "${WARN} Hardware file checked: ${resolvedHardware}"
+    echo "${NOTE} Expected generated host hardware at: ./.local-hosts/${hostName}/hardware.nix"
+    echo "${NOTE} Template fallback is: ./hosts/default/hardware.nix"
     echo "${NOTE} Skipping TPM unlock enrollment. Disk encryption must be provisioned at install/partitioning time."
     return 0
   fi
@@ -1736,13 +1773,14 @@ nhl_run_luks_tpm_enrollment() {
     sha512sum |
     awk '{print $1}')
 
-  # Recovery hashes belong with generated host-specific state.
-  hashFile="./.local-hosts/$hostName/.luks-recovery-key.sha256"
-  hashFile512="./.local-hosts/$hostName/.luks-recovery-key.sha512"
+  local recoveryDir="./.local-hosts/$hostName"
+
+  mkdir -p "$recoveryDir"
+
+  hashFile="${recoveryDir}/.luks-recovery-key.sha256"
+  hashFile512="${recoveryDir}/.luks-recovery-key.sha512"
 
   umask 077
-
-  mkdir -p "./.local-hosts/$hostName"
 
   cat >"$hashFile" <<EOF
 device=$luksDevice
