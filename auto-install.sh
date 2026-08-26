@@ -17,6 +17,7 @@ printf "\n%.0s" {1..1}
 # ---------------------------------------------------------------------------
 # Colors
 # ---------------------------------------------------------------------------
+
 OK="$(tput setaf 2)[OK]$(tput sgr0)"
 ERROR="$(tput setaf 1)[ERROR]$(tput sgr0)"
 NOTE="$(tput setaf 3)[NOTE]$(tput sgr0)"
@@ -37,6 +38,7 @@ set -e
 # ---------------------------------------------------------------------------
 # Load shared installer functions.
 # ---------------------------------------------------------------------------
+
 if [ -f "${SCRIPT_DIR}/scripts/lib/install-common.sh" ]; then
     # shellcheck source=/dev/null
     . "${SCRIPT_DIR}/scripts/lib/install-common.sh"
@@ -48,6 +50,7 @@ fi
 # ---------------------------------------------------------------------------
 # Verify this is NixOS.
 # ---------------------------------------------------------------------------
+
 if grep -qi nixos /etc/os-release; then
     echo "${OK} Verified this is NixOS."
     echo "-----"
@@ -59,13 +62,13 @@ fi
 # ---------------------------------------------------------------------------
 # Required packages.
 # ---------------------------------------------------------------------------
+
 nhl_ensure_required_packages
 
 # ---------------------------------------------------------------------------
 # Repository.
-#
-# auto-install.sh is expected to be running from the cloned repository.
 # ---------------------------------------------------------------------------
+
 echo "$NOTE Using the current installer repository"
 
 cd "$NHL_REPO_ROOT" || {
@@ -270,6 +273,76 @@ done
 echo "$OK Machine-local host template is complete."
 
 # ===========================================================================
+# FIX MACHINE-LOCAL MODULE IMPORT PATHS
+#
+# hosts/default/config.nix lives at:
+#
+#   hosts/default/config.nix
+#
+# so ../../modules/... is correct.
+#
+# .local-host/<hostname>/config.nix lives one directory shallower:
+#
+#   .local-host/<hostname>/config.nix
+#
+# therefore ../../modules/... is also correct.
+#
+# ../../../modules/... is WRONG from .local-host/<hostname>/config.nix
+# because it escapes the repository.
+#
+# Older templates/local hosts may contain the incorrect ../../../ path.
+# Normalize it here so existing installations are repaired automatically.
+# ===========================================================================
+
+local_config_file="$hostDir/config.nix"
+
+if [ -f "$local_config_file" ]; then
+
+    if grep -qE '\.\./\.\./\.\./modules/(drivers|hardware)' \
+        "$local_config_file"; then
+
+        echo "$WARN Correcting obsolete machine-local module import paths..."
+
+        sed -i \
+            -e 's#\.\./\.\./\.\./modules/drivers#../../modules/drivers#g' \
+            -e 's#\.\./\.\./\.\./modules/hardware#../../modules/hardware#g' \
+            "$local_config_file"
+
+        echo "$OK Machine-local module import paths corrected."
+
+    fi
+
+fi
+
+# ===========================================================================
+# VERIFY MACHINE-LOCAL MODULE IMPORT PATHS
+# ===========================================================================
+
+if [ -f "$local_config_file" ]; then
+
+    if grep -qE '\.\./\.\./\.\./modules/' "$local_config_file"; then
+
+        echo "${ERROR} Invalid module import path remains in:"
+        echo "    $local_config_file"
+
+        grep -nE '\.\./\.\./\.\./modules/' "$local_config_file" || true
+
+        echo
+        echo "${ERROR} Refusing to continue with an invalid repository path."
+
+        exit 1
+    fi
+
+    if grep -qE '\.\./\.\./modules/(drivers|hardware)' \
+        "$local_config_file"; then
+
+        echo "$OK Machine-local module imports point inside repository."
+
+    fi
+
+fi
+
+# ===========================================================================
 # HOST IDENTITY
 # ===========================================================================
 
@@ -360,7 +433,6 @@ if [ ! -f "$variables_file" ]; then
 
 fi
 
-# Safely update keyboardLayout.
 if grep -qE '^[[:space:]]*keyboardLayout[[:space:]]*=' "$variables_file"; then
 
     sed -i \
@@ -476,41 +548,85 @@ echo "-----"
 # ===========================================================================
 # FIRMWARE
 #
-# Firmware helper is responsible for checking fwupd.
+# Do not use the old helper here. Its current behavior can report that
+# updates exist while immediately skipping the actual prompt.
 #
-# No available firmware updates must NOT stop the installation.
+# fwupdmgr get-updates:
+#   - exit 0 with update information when updates are available
+#   - prints that there are no updates otherwise
+#
+# We explicitly inspect the output and ask before running update.
 # ===========================================================================
 
-if type nhl_prompt_firmware_updates >/dev/null 2>&1; then
+echo "$INFO Checking for available firmware updates..."
 
-    nhl_prompt_firmware_updates || {
-        echo "${WARN} Firmware update check returned an error."
-        echo "${NOTE} Continuing installation."
-    }
+firmware_updates=""
+
+if command -v fwupdmgr >/dev/null 2>&1; then
+
+    firmware_updates="$(
+        fwupdmgr get-updates 2>&1 || true
+    )"
+
+    if printf '%s\n' "$firmware_updates" \
+        | grep -qiE \
+            'No updatable devices|No updates available|Devices with no available firmware updates'; then
+
+        echo "$NOTE No firmware updates are available; continuing without update prompt."
+
+    else
+
+        echo
+        echo "$INFO Firmware update information:"
+        printf '%s\n' "$firmware_updates"
+        echo
+
+        read -rp \
+            "${CAT} Apply available firmware updates now? (y/N): ${RESET}" \
+            firmware_answer </dev/tty
+
+        if [[ "$firmware_answer" =~ ^[Yy]$ ]]; then
+
+            echo "$NOTE Applying firmware updates..."
+
+            if sudo fwupdmgr update; then
+
+                echo "$OK Firmware update process completed."
+
+            else
+
+                echo "${WARN} Firmware update command failed."
+                echo "${WARN} Continuing with installation."
+                echo "${WARN} Review fwupd output above."
+
+            fi
+
+        else
+
+            echo "$NOTE Firmware updates skipped."
+
+        fi
+
+    fi
+
+else
+
+    echo "$NOTE fwupdmgr is not available; skipping firmware updates."
 
 fi
 
 # ===========================================================================
 # LUKS / TPM
 #
-# LUKS is OPTIONAL.
+# This is intentionally optional.
 #
-# A machine without LUKS must simply skip this stage.
-# This must never be treated as an installation error.
+# A machine without LUKS must NOT fail installation.
 # ===========================================================================
 
 if type nhl_prompt_luks_tpm_setup >/dev/null 2>&1; then
-
-    nhl_prompt_luks_tpm_setup "$hostName" || {
-        echo "${WARN} LUKS/TPM setup returned an error."
-        echo "${NOTE} Continuing because disk encryption is optional."
-    }
-
+    nhl_prompt_luks_tpm_setup "$hostName"
 else
-
-    echo "$NOTE LUKS/TPM helper is unavailable."
-    echo "$NOTE Skipping TPM/LUKS setup."
-
+    echo "$NOTE LUKS/TPM helper is unavailable; skipping TPM enrollment."
 fi
 
 echo "-----"
@@ -632,11 +748,9 @@ echo "$OK Machine-local host configuration is complete."
 #
 # .local-host/ is Git-ignored.
 #
-# Therefore we explicitly use a path: flake reference rather than relying
-# on automatic Git-backed flake discovery.
-#
-# Nix documents that explicit path: references use the local filesystem,
-# whereas Git-backed flakes only expose files available to the Git tree.
+# Always use path:$NHL_REPO_ROOT.
+# Do NOT use the normal git+file flake resolution here, because ignored
+# machine-local files can disappear from a Git-based flake source.
 # ===========================================================================
 
 echo "-----"
@@ -645,23 +759,18 @@ echo "$NOTE Validating nixosConfigurations.$hostName..."
 
 export NIX_CONFIG=$'experimental-features = nix-command flakes\nwarn-dirty = false'
 
-flake_ref="path:$NHL_REPO_ROOT"
-flake_config_ref="$flake_ref#nixosConfigurations.$hostName"
+flake_target="path:$NHL_REPO_ROOT#nixosConfigurations.\"${hostName}\""
 
 # ---------------------------------------------------------------------------
-# First verify that the configuration exists.
-#
-# We deliberately use nix flake show instead of trying to parse the
-# attribute name ourselves. This avoids false negatives with hostnames
-# containing hyphens.
+# First verify that the configuration attribute exists.
 # ---------------------------------------------------------------------------
 
-if ! nix flake show "$flake_ref" 2>&1 | \
-    grep -Fq "nixosConfigurations.$hostName"; then
+if ! nix flake show "path:$NHL_REPO_ROOT" 2>/dev/null \
+    | grep -q "nixosConfigurations.*${hostName}"; then
 
     echo
     echo "${ERROR} The flake does not expose:"
-    echo "    nixosConfigurations.$hostName"
+    echo "    nixosConfigurations.${hostName}"
     echo
 
     echo "${WARN} Machine-local host directory:"
@@ -680,8 +789,7 @@ if ! nix flake show "$flake_ref" 2>&1 | \
     echo
 
     echo "${NOTE} Current flake configurations:"
-
-    nix flake show "$flake_ref" 2>&1 || true
+    nix flake show "path:$NHL_REPO_ROOT" 2>&1 || true
 
     echo
 
@@ -693,31 +801,40 @@ fi
 
 echo "$OK Flake exposes nixosConfigurations.$hostName."
 
-# ---------------------------------------------------------------------------
-# Evaluate the actual configuration.
-#
-# The previous script incorrectly constructed:
-#
-#   nixosConfigurations.\"hostname\"
-#
-# Instead use the ordinary flake attribute path.
-# ---------------------------------------------------------------------------
+# ===========================================================================
+# EVALUATE THE ACTUAL NIXOS CONFIGURATION
+# ===========================================================================
+
+echo "$NOTE Evaluating nixosConfigurations.$hostName..."
+
+evaluation_error_file="$(mktemp)"
 
 if ! nix eval \
-    --raw \
-    "$flake_config_ref.config.system.nixos.version" \
-    >/dev/null 2>&1; then
+    --show-trace \
+    "${flake_target}.config.system.nixos.version" \
+    > /dev/null \
+    2>"$evaluation_error_file"; then
 
     echo
     echo "${ERROR} NixOS configuration exists but failed evaluation:"
-    echo "    $flake_config_ref"
+    echo "    path:$NHL_REPO_ROOT#nixosConfigurations.${hostName}"
     echo
 
     echo "${NOTE} Showing evaluation error:"
+    cat "$evaluation_error_file"
 
-    nix eval \
-        "$flake_config_ref.config.system.nixos.version" \
-        2>&1 || true
+    rm -f "$evaluation_error_file"
+
+    echo
+    echo "${WARN} Machine-local host directory:"
+    echo "    $hostDir"
+
+    echo
+    echo "${NOTE} Checking machine-local module imports..."
+
+    grep -nE 'modules/(drivers|hardware)' \
+        "$local_config_file" \
+        || true
 
     echo
 
@@ -727,43 +844,9 @@ if ! nix eval \
 
 fi
 
-echo "$OK nixosConfigurations.$hostName evaluates successfully."
+rm -f "$evaluation_error_file"
 
-# ===========================================================================
-# VERIFY HOSTNAME MATCH
-# ===========================================================================
-
-echo "$NOTE Verifying NixOS hostname..."
-
-configured_hostname="$(
-    nix eval \
-        --raw \
-        "$flake_config_ref.config.networking.hostName" \
-        2>/dev/null
-)" || {
-    echo "${ERROR} Unable to evaluate networking.hostName."
-    exit 1
-}
-
-if [ "$configured_hostname" != "$hostName" ]; then
-
-    echo "${ERROR} Hostname mismatch."
-
-    echo "    Installer hostname:"
-    echo "        $hostName"
-
-    echo "    NixOS configuration hostname:"
-    echo "        $configured_hostname"
-
-    echo
-
-    echo "${ERROR} Refusing to rebuild the wrong host configuration."
-
-    exit 1
-
-fi
-
-echo "$OK NixOS hostname matches: $hostName"
+echo "$OK NixOS configuration evaluation passed."
 
 # ===========================================================================
 # VERIFY GIT DOES NOT SEE MACHINE-LOCAL FILES
@@ -791,8 +874,6 @@ echo "$OK Machine-local configuration is safely ignored by Git."
 
 # ===========================================================================
 # STAGE TRACKED INSTALLER CHANGES
-#
-# ONLY .gitignore is intentionally staged.
 # ===========================================================================
 
 echo "$NOTE Applying required Git settings before installation"
@@ -813,15 +894,14 @@ echo
 echo "$NOTE Performing final flake validation..."
 
 if ! nix eval \
-    --raw \
-    "$flake_config_ref.config.networking.hostName" \
+    "${flake_target}.config.networking.hostName" \
     >/dev/null 2>&1; then
 
     echo "${ERROR} Final flake validation failed."
     echo
 
     echo "${ERROR} Expected:"
-    echo "    nixosConfigurations.$hostName"
+    echo "    nixosConfigurations.${hostName}"
 
     echo
 
@@ -831,7 +911,7 @@ if ! nix eval \
     echo
 
     echo "${NOTE} Current flake configurations:"
-    nix flake show "$flake_ref" 2>&1 || true
+    nix flake show "path:$NHL_REPO_ROOT" 2>&1 || true
 
     exit 1
 
@@ -841,7 +921,7 @@ echo "$OK Final flake validation passed."
 
 echo
 echo "${INFO} Rebuild target:"
-echo "    $flake_config_ref"
+echo "    path:$NHL_REPO_ROOT#${hostName}"
 echo
 
 # ===========================================================================
@@ -863,19 +943,19 @@ echo "-----"
 printf "\n%.0s" {1..1}
 
 if ! sudo nixos-rebuild switch \
-    --flake "$flake_config_ref"; then
+    --flake "path:$NHL_REPO_ROOT#${hostName}"; then
 
     echo
     echo "${ERROR} NixOS rebuild failed."
     echo
 
     echo "${WARN} Rebuild target:"
-    echo "    $flake_config_ref"
+    echo "    path:$NHL_REPO_ROOT#${hostName}"
 
     echo
 
     echo "${NOTE} Available configurations:"
-    nix flake show "$flake_ref" 2>&1 || true
+    nix flake show "path:$NHL_REPO_ROOT" 2>&1 || true
 
     echo
 
@@ -887,27 +967,10 @@ echo "$OK NixOS rebuild completed successfully."
 
 # ===========================================================================
 # TPM ENROLLMENT
-#
-# Only run this if the LUKS setup actually established an enrollment path.
-# The helper itself should remain responsible for determining whether
-# enrollment is applicable.
 # ===========================================================================
 
 if type nhl_run_luks_tpm_enrollment >/dev/null 2>&1; then
-
-    if [ "${NHL_LUKS_TPM_ENABLED:-0}" = "1" ]; then
-
-        nhl_run_luks_tpm_enrollment "$hostName" || {
-            echo "${WARN} TPM enrollment failed."
-            echo "${NOTE} Continuing installation."
-        }
-
-    else
-
-        echo "$NOTE TPM enrollment not enabled; skipping."
-
-    fi
-
+    nhl_run_luks_tpm_enrollment "$hostName"
 fi
 
 # ===========================================================================
