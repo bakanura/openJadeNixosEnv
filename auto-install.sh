@@ -114,36 +114,6 @@ echo "-----"
 
 # ===========================================================================
 # MACHINE-LOCAL HOST PATHS
-#
-# THIS IS THE SINGLE SOURCE OF TRUTH FOR MACHINE-LOCAL FILES.
-#
-# Repository:
-#
-#   hosts/
-#   └── default/
-#       ├── config.nix
-#       ├── hardware.nix
-#       ├── packages-fonts.nix
-#       ├── users.nix
-#       └── variables.nix
-#
-#   .local-host/
-#   └── <hostname>/
-#       ├── config.nix
-#       ├── hardware.nix
-#       ├── packages-fonts.nix
-#       ├── users.nix
-#       ├── variables.nix
-#       ├── identity.json
-#       └── .installer-state.json
-#
-# hosts/default is centrally managed and Git-tracked.
-#
-# .local-host is machine-specific and Git-ignored.
-#
-# IMPORTANT:
-#
-# Everything below that refers to the current machine MUST use hostDir.
 # ===========================================================================
 
 localHostRoot="$NHL_REPO_ROOT/.local-host"
@@ -257,11 +227,6 @@ echo "-----"
 
 # ===========================================================================
 # CREATE MACHINE-LOCAL HOST FILES
-#
-# hosts/default is the permanent template.
-#
-# Files are copied only when the machine-local file does not exist.
-# Existing machine-local files are never overwritten.
 # ===========================================================================
 
 required_host_files=(
@@ -395,6 +360,7 @@ if [ ! -f "$variables_file" ]; then
 
 fi
 
+# Safely update keyboardLayout.
 if grep -qE '^[[:space:]]*keyboardLayout[[:space:]]*=' "$variables_file"; then
 
     sed -i \
@@ -451,14 +417,6 @@ echo "    $identity_file"
 
 # ===========================================================================
 # HARDWARE CONFIGURATION
-#
-# Hardware is machine-specific.
-#
-# It belongs at:
-#
-#   .local-host/<hostname>/hardware.nix
-#
-# and is imported by the machine-local config.nix.
 # ===========================================================================
 
 echo "$NOTE Generating hardware configuration"
@@ -517,23 +475,42 @@ echo "-----"
 
 # ===========================================================================
 # FIRMWARE
+#
+# Firmware helper is responsible for checking fwupd.
+#
+# No available firmware updates must NOT stop the installation.
 # ===========================================================================
 
 if type nhl_prompt_firmware_updates >/dev/null 2>&1; then
-    nhl_prompt_firmware_updates
+
+    nhl_prompt_firmware_updates || {
+        echo "${WARN} Firmware update check returned an error."
+        echo "${NOTE} Continuing installation."
+    }
+
 fi
 
 # ===========================================================================
 # LUKS / TPM
 #
-# No LUKS is a valid configuration.
+# LUKS is OPTIONAL.
 #
-# nhl_prompt_luks_tpm_setup must therefore return successfully when the
-# generated hardware.nix contains no LUKS mapping.
+# A machine without LUKS must simply skip this stage.
+# This must never be treated as an installation error.
 # ===========================================================================
 
 if type nhl_prompt_luks_tpm_setup >/dev/null 2>&1; then
-    nhl_prompt_luks_tpm_setup "$hostName"
+
+    nhl_prompt_luks_tpm_setup "$hostName" || {
+        echo "${WARN} LUKS/TPM setup returned an error."
+        echo "${NOTE} Continuing because disk encryption is optional."
+    }
+
+else
+
+    echo "$NOTE LUKS/TPM helper is unavailable."
+    echo "$NOTE Skipping TPM/LUKS setup."
+
 fi
 
 echo "-----"
@@ -655,12 +632,11 @@ echo "$OK Machine-local host configuration is complete."
 #
 # .local-host/ is Git-ignored.
 #
-# Always use:
+# Therefore we explicitly use a path: flake reference rather than relying
+# on automatic Git-backed flake discovery.
 #
-#   path:$NHL_REPO_ROOT
-#
-# so Nix evaluates the actual working-tree filesystem, including ignored
-# machine-local files.
+# Nix documents that explicit path: references use the local filesystem,
+# whereas Git-backed flakes only expose files available to the Git tree.
 # ===========================================================================
 
 echo "-----"
@@ -669,27 +645,23 @@ echo "$NOTE Validating nixosConfigurations.$hostName..."
 
 export NIX_CONFIG=$'experimental-features = nix-command flakes\nwarn-dirty = false'
 
-flake_path="path:$NHL_REPO_ROOT"
-flake_target="path:$NHL_REPO_ROOT#${hostName}"
+flake_ref="path:$NHL_REPO_ROOT"
+flake_config_ref="$flake_ref#nixosConfigurations.$hostName"
 
 # ---------------------------------------------------------------------------
-# First verify that the configuration attribute itself exists.
+# First verify that the configuration exists.
 #
-# This deliberately uses the same attribute syntax as nixos-rebuild:
-#
-#   path:/repo#hostname
-#
-# rather than embedding "nixosConfigurations" in the flake reference.
+# We deliberately use nix flake show instead of trying to parse the
+# attribute name ourselves. This avoids false negatives with hostnames
+# containing hyphens.
 # ---------------------------------------------------------------------------
 
-if ! nix eval \
-    --json \
-    "${flake_path}.nixosConfigurations.\"${hostName}\"" \
-    >/dev/null 2>&1; then
+if ! nix flake show "$flake_ref" 2>&1 | \
+    grep -Fq "nixosConfigurations.$hostName"; then
 
     echo
     echo "${ERROR} The flake does not expose:"
-    echo "    nixosConfigurations.${hostName}"
+    echo "    nixosConfigurations.$hostName"
     echo
 
     echo "${WARN} Machine-local host directory:"
@@ -709,7 +681,7 @@ if ! nix eval \
 
     echo "${NOTE} Current flake configurations:"
 
-    nix flake show "$flake_path" 2>&1 || true
+    nix flake show "$flake_ref" 2>&1 || true
 
     echo
 
@@ -719,28 +691,33 @@ if ! nix eval \
 
 fi
 
-echo "$OK Flake exports nixosConfigurations.$hostName."
+echo "$OK Flake exposes nixosConfigurations.$hostName."
 
 # ---------------------------------------------------------------------------
-# Validate the actual NixOS system derivation.
+# Evaluate the actual configuration.
+#
+# The previous script incorrectly constructed:
+#
+#   nixosConfigurations.\"hostname\"
+#
+# Instead use the ordinary flake attribute path.
 # ---------------------------------------------------------------------------
 
 if ! nix eval \
     --raw \
-    "${flake_path}.nixosConfigurations.\"${hostName}\".config.system.nixos.version" \
+    "$flake_config_ref.config.system.nixos.version" \
     >/dev/null 2>&1; then
 
     echo
-    echo "${ERROR} nixosConfigurations.${hostName} exists, but its NixOS"
-    echo "${ERROR} system configuration could not be evaluated."
+    echo "${ERROR} NixOS configuration exists but failed evaluation:"
+    echo "    $flake_config_ref"
     echo
 
-    echo "${WARN} Rebuild target:"
-    echo "    $flake_target"
-    echo
+    echo "${NOTE} Showing evaluation error:"
 
-    echo "${NOTE} Current flake configurations:"
-    nix flake show "$flake_path" 2>&1 || true
+    nix eval \
+        "$flake_config_ref.config.system.nixos.version" \
+        2>&1 || true
 
     echo
 
@@ -750,7 +727,43 @@ if ! nix eval \
 
 fi
 
-echo "$OK NixOS configuration evaluates successfully."
+echo "$OK nixosConfigurations.$hostName evaluates successfully."
+
+# ===========================================================================
+# VERIFY HOSTNAME MATCH
+# ===========================================================================
+
+echo "$NOTE Verifying NixOS hostname..."
+
+configured_hostname="$(
+    nix eval \
+        --raw \
+        "$flake_config_ref.config.networking.hostName" \
+        2>/dev/null
+)" || {
+    echo "${ERROR} Unable to evaluate networking.hostName."
+    exit 1
+}
+
+if [ "$configured_hostname" != "$hostName" ]; then
+
+    echo "${ERROR} Hostname mismatch."
+
+    echo "    Installer hostname:"
+    echo "        $hostName"
+
+    echo "    NixOS configuration hostname:"
+    echo "        $configured_hostname"
+
+    echo
+
+    echo "${ERROR} Refusing to rebuild the wrong host configuration."
+
+    exit 1
+
+fi
+
+echo "$OK NixOS hostname matches: $hostName"
 
 # ===========================================================================
 # VERIFY GIT DOES NOT SEE MACHINE-LOCAL FILES
@@ -778,6 +791,8 @@ echo "$OK Machine-local configuration is safely ignored by Git."
 
 # ===========================================================================
 # STAGE TRACKED INSTALLER CHANGES
+#
+# ONLY .gitignore is intentionally staged.
 # ===========================================================================
 
 echo "$NOTE Applying required Git settings before installation"
@@ -799,14 +814,14 @@ echo "$NOTE Performing final flake validation..."
 
 if ! nix eval \
     --raw \
-    "${flake_path}.nixosConfigurations.\"${hostName}\".config.networking.hostName" \
+    "$flake_config_ref.config.networking.hostName" \
     >/dev/null 2>&1; then
 
     echo "${ERROR} Final flake validation failed."
     echo
 
     echo "${ERROR} Expected:"
-    echo "    nixosConfigurations.${hostName}"
+    echo "    nixosConfigurations.$hostName"
 
     echo
 
@@ -816,7 +831,7 @@ if ! nix eval \
     echo
 
     echo "${NOTE} Current flake configurations:"
-    nix flake show "$flake_path" 2>&1 || true
+    nix flake show "$flake_ref" 2>&1 || true
 
     exit 1
 
@@ -826,7 +841,7 @@ echo "$OK Final flake validation passed."
 
 echo
 echo "${INFO} Rebuild target:"
-echo "    $flake_target"
+echo "    $flake_config_ref"
 echo
 
 # ===========================================================================
@@ -848,19 +863,19 @@ echo "-----"
 printf "\n%.0s" {1..1}
 
 if ! sudo nixos-rebuild switch \
-    --flake "$flake_target"; then
+    --flake "$flake_config_ref"; then
 
     echo
     echo "${ERROR} NixOS rebuild failed."
     echo
 
     echo "${WARN} Rebuild target:"
-    echo "    $flake_target"
+    echo "    $flake_config_ref"
 
     echo
 
     echo "${NOTE} Available configurations:"
-    nix flake show "$flake_path" 2>&1 || true
+    nix flake show "$flake_ref" 2>&1 || true
 
     echo
 
@@ -872,10 +887,27 @@ echo "$OK NixOS rebuild completed successfully."
 
 # ===========================================================================
 # TPM ENROLLMENT
+#
+# Only run this if the LUKS setup actually established an enrollment path.
+# The helper itself should remain responsible for determining whether
+# enrollment is applicable.
 # ===========================================================================
 
 if type nhl_run_luks_tpm_enrollment >/dev/null 2>&1; then
-    nhl_run_luks_tpm_enrollment "$hostName"
+
+    if [ "${NHL_LUKS_TPM_ENABLED:-0}" = "1" ]; then
+
+        nhl_run_luks_tpm_enrollment "$hostName" || {
+            echo "${WARN} TPM enrollment failed."
+            echo "${NOTE} Continuing installation."
+        }
+
+    else
+
+        echo "$NOTE TPM enrollment not enabled; skipping."
+
+    fi
+
 fi
 
 # ===========================================================================
