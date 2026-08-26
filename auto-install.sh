@@ -351,161 +351,61 @@ echo "-----"
 
 # ===========================================================================
 # KEYBOARD LAYOUT
+#
+# IMPORTANT:
+#
+# The value entered here is the XKB/Hyprland keyboard layout:
+#
+#     de
+#     us
+#     gb
+#     fr
+#     pl
+#     etc.
+#
+# Do NOT use `loadkeys --parse <layout>` here. `loadkeys --parse` parses
+# keymap data/files; it is not a reliable symbolic-name resolver for values
+# such as "de".
+#
+# The original JaKooLit installer also simply accepts the layout string and
+# passes it to the timezone/console-keymap helper.
 # ===========================================================================
 
 keyboardDefault="${NHL_STATE_KEYBOARD_LAYOUT:-de}"
 
-if ! command -v loadkeys >/dev/null 2>&1; then
-    echo "${ERROR} loadkeys is required to validate keyboard layouts."
-    exit 1
-fi
-
 # ---------------------------------------------------------------------------
-# Resolve a keyboard layout against the keymaps installed on this system.
+# Determine whether a supplied keyboard layout is a plausible XKB layout.
 #
-# A user may enter:
+# We intentionally do not require loadkeys to resolve it.
 #
-#   de
-#   de-latin1
-#   us
-#   uk
-#   etc.
+# This keeps:
 #
-# The requested name is first given directly to loadkeys. If that does not
-# work, the installed keymap files are searched dynamically.
+#     de
 #
-# For example:
+# valid even when the current NixOS generation does not expose a kbd
+# keymap file named exactly "de".
 #
-#   de -> de-latin1
-#
-# when de-latin1 is the installed German keymap.
-#
-# No hardcoded layout aliases are required.
+# XKB layouts and Linux console keymaps are related but are NOT identical
+# namespaces.
 # ---------------------------------------------------------------------------
-nhl_resolve_keymap() {
+nhl_validate_keyboard_layout() {
 
     local requested="${1,,}"
-    local keymap_root
-    local candidate
-    local filename
-    local base
-    local exact_match=""
-    local prefix_match=""
 
     [ -n "$requested" ] || return 1
 
-    # If kbd itself can resolve the requested name, keep that name.
-    if loadkeys --parse "$requested" >/dev/null 2>&1; then
-        printf '%s\n' "$requested"
-        return 0
-    fi
-
-    # Search the keymaps installed by the current NixOS generation first,
-    # followed by conventional kbd locations.
-    while IFS= read -r keymap_root; do
-
-        [ -d "$keymap_root" ] || continue
-
-        while IFS= read -r -d '' candidate; do
-
-            filename="$(basename "$candidate")"
-            base="$filename"
-
-            case "$base" in
-                *.map.gz)
-                    base="${base%.map.gz}"
-                    ;;
-                *.map)
-                    base="${base%.map}"
-                    ;;
-                *.bmap.gz)
-                    base="${base%.bmap.gz}"
-                    ;;
-                *.bmap)
-                    base="${base%.bmap}"
-                    ;;
-            esac
-
-            base="${base,,}"
-
-            # Exact match has priority.
-            if [ "$base" = "$requested" ]; then
-                exact_match="$candidate"
-                break
-            fi
-
-            # If there is no exact match, remember a variant such as:
-            #
-            #   de -> de-latin1
-            #   us -> us-acentos
-            #
-            if [ -z "$prefix_match" ] \
-                && [[ "$base" == "${requested}-"* ]]; then
-
-                prefix_match="$candidate"
-
-            fi
-
-        done < <(
-            find "$keymap_root" \
-                -type f \
-                \( \
-                    -name '*.map' \
-                    -o -name '*.map.gz' \
-                    -o -name '*.bmap' \
-                    -o -name '*.bmap.gz' \
-                \) \
-                -print0 \
-                2>/dev/null \
-                | sort -z
-        )
-
-        [ -n "$exact_match" ] && break
-
-    done < <(
-        printf '%s\n' \
-            "/run/current-system/sw/share/keymaps" \
-            "/usr/share/keymaps" \
-            "/usr/share/kbd/keymaps"
-    )
-
-    if [ -n "$exact_match" ]; then
-
-        candidate="$exact_match"
-
-    elif [ -n "$prefix_match" ]; then
-
-        candidate="$prefix_match"
-
-    else
-
-        return 1
-
-    fi
-
-    filename="$(basename "$candidate")"
-    base="$filename"
-
-    case "$base" in
-        *.map.gz)
-            base="${base%.map.gz}"
-            ;;
-        *.map)
-            base="${base%.map}"
-            ;;
-        *.bmap.gz)
-            base="${base%.bmap.gz}"
-            ;;
-        *.bmap)
-            base="${base%.bmap}"
-            ;;
-    esac
-
-    base="${base,,}"
-
-    # Validate the actual installed keymap before accepting it.
-    if loadkeys --parse "$candidate" >/dev/null 2>&1; then
-        printf '%s\n' "$base"
+    # Accept the normal XKB layout identifier format.
+    #
+    # Examples:
+    #   de
+    #   us
+    #   gb
+    #   fr
+    #   de_nodeadkeys
+    #   us_intl
+    #
+    # Layout names may contain letters, numbers, underscores and hyphens.
+    if [[ "$requested" =~ ^[a-z][a-z0-9_-]*$ ]]; then
         return 0
     fi
 
@@ -536,21 +436,15 @@ while true; do
 
     keyboardLayout="${keyboardLayout,,}"
 
-    # Resolve the entered value to an installed console keymap.
-    resolved_keymap="$(
-        nhl_resolve_keymap "$keyboardLayout" 2>/dev/null || true
-    )"
+    if nhl_validate_keyboard_layout "$keyboardLayout"; then
 
-    if [ -n "$resolved_keymap" ]; then
-
-        keyboardLayout="$resolved_keymap"
-
-        echo "$OK Keyboard layout verified: $keyboardLayout"
+        echo "$OK Keyboard layout accepted: $keyboardLayout"
         break
 
     fi
 
-    echo "${WARN} Keyboard layout '$keyboardLayout' could not be resolved."
+    echo "${WARN} Invalid keyboard layout '$keyboardLayout'."
+    echo "${NOTE} Examples: de, us, gb, fr, pl"
 
 done
 
@@ -572,7 +466,7 @@ fi
 if grep -qE '^[[:space:]]*keyboardLayout[[:space:]]*=' "$variables_file"; then
 
     sed -i \
-        's/^[[:space:]]*keyboardLayout[[:space:]]*=[[:space:]]*"[^"]*"/  keyboardLayout = "'"$keyboardLayout"'"/' \
+        's/^[[:space:]]*keyboardLayout[[:space:]]*=[[:space:]]*"[^"]*"/  keyboardLayout = "'"$keyboardLayout"'";/' \
         "$variables_file"
 
 else
