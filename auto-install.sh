@@ -349,37 +349,9 @@ echo "-----"
 
 # ===========================================================================
 # KEYBOARD LAYOUT
-#
-# IMPORTANT:
-#
-# Do NOT maintain a hardcoded list such as:
-#
-#   de -> de-latin1
-#   fr -> fr-latin1
-#   ...
-#
-# The installed kbd package is the source of truth.
-#
-# loadkeys --parse validates console keymaps, but an XKB-style name such as
-# "de" is not necessarily the name of an installed console keymap.
-#
-# We therefore:
-#
-#   1. Accept an exact keymap if loadkeys can resolve it.
-#   2. Otherwise search the actually installed keymaps dynamically.
-#   3. If an exact basename is not present, match the requested name against
-#      the first component of installed keymap names.
-#
-# Example:
-#
-#   user enters:       de
-#   installed map:     de-latin1
-#   normalized value:  de-latin1
-#
-# No country/layout mapping is hardcoded.
 # ===========================================================================
 
-keyboardDefault="${NHL_STATE_KEYBOARD_LAYOUT:-de-latin1}"
+keyboardDefault="${NHL_STATE_KEYBOARD_LAYOUT:-de}"
 
 if ! command -v loadkeys >/dev/null 2>&1; then
     echo "${ERROR} loadkeys is required to validate keyboard layouts."
@@ -387,205 +359,93 @@ if ! command -v loadkeys >/dev/null 2>&1; then
 fi
 
 # ---------------------------------------------------------------------------
-# Discover installed keymap directories dynamically.
-# ---------------------------------------------------------------------------
-
-nhl_find_keymap_candidates() {
-
-    local search_roots=(
-        "/run/current-system/sw/share/keymaps"
-        "/run/current-system/etc/kbd/keymaps"
-        "/etc/kbd/keymaps"
-        "/usr/share/keymaps"
-        "/usr/share/kbd/keymaps"
-        "/lib/kbd/keymaps"
-    )
-
-    local root
-
-    for root in "${search_roots[@]}"; do
-
-        if [ -d "$root" ]; then
-
-            find "$root" \
-                -type f \
-                \( \
-                    -name '*.map' \
-                    -o -name '*.map.gz' \
-                    -o -name '*.map.bz2' \
-                    -o -name '*.map.xz' \
-                \) \
-                -print 2>/dev/null
-
-        fi
-
-    done
-}
-
-# ---------------------------------------------------------------------------
-# Convert a discovered keymap filename into the name accepted by loadkeys.
+# Locate an installed console keymap dynamically.
 #
-# Examples:
+# NixOS may keep keymaps below:
 #
-#   de-latin1.map.gz          -> de-latin1
-#   i386/qwertz/de-latin1.gz  -> de-latin1
+#   /run/current-system/sw/share/keymaps
+#   /usr/share/keymaps
+#   /usr/share/kbd/keymaps
 #
-# We deliberately remove compression extensions and .map.
+# The entered value can therefore be either:
+#
+#   de
+#   de-latin1
+#   us
+#   uk
+#   ...
+#
+# The actual installed keymap file is resolved before loadkeys is called.
 # ---------------------------------------------------------------------------
+nhl_resolve_keymap() {
 
-nhl_keymap_name_from_path() {
-
-    local path="$1"
-    local name
-
-    name="$(basename "$path")"
-
-    case "$name" in
-        *.map.gz)
-            name="${name%.map.gz}"
-            ;;
-        *.map.bz2)
-            name="${name%.map.bz2}"
-            ;;
-        *.map.xz)
-            name="${name%.map.xz}"
-            ;;
-        *.map)
-            name="${name%.map}"
-            ;;
-        *.gz)
-            name="${name%.gz}"
-            ;;
-        *.bz2)
-            name="${name%.bz2}"
-            ;;
-        *.xz)
-            name="${name%.xz}"
-            ;;
-    esac
-
-    printf '%s\n' "$name"
-}
-
-# ---------------------------------------------------------------------------
-# Resolve an arbitrary user-entered console keymap name against installed
-# keymaps without using a hardcoded layout table.
-# ---------------------------------------------------------------------------
-
-nhl_resolve_console_keymap() {
-
-    local requested="$1"
+    local requested="${1,,}"
+    local keymap_root
     local candidate
-    local candidate_name
-    local candidate_base
-    local first_match=""
-    local exact_match=""
+    local base
+    local found=""
 
-    requested="${requested,,}"
-
-    # -----------------------------------------------------------------------
-    # First: ask loadkeys directly.
-    #
-    # This is the most authoritative test because loadkeys itself knows how
-    # its installed keymap database is resolved.
-    # -----------------------------------------------------------------------
-
-    if loadkeys --parse "$requested" >/dev/null 2>&1; then
+    # If the user supplied a path to an existing keymap, use it directly.
+    if [ -f "$requested" ]; then
         printf '%s\n' "$requested"
         return 0
     fi
 
-    # -----------------------------------------------------------------------
-    # Second: inspect actual installed keymap files.
-    # -----------------------------------------------------------------------
+    # Search all likely system keymap locations.
+    while IFS= read -r keymap_root; do
 
-    while IFS= read -r candidate; do
+        [ -d "$keymap_root" ] || continue
 
-        [ -n "$candidate" ] || continue
+        while IFS= read -r -d '' candidate; do
 
-        candidate_name="$(nhl_keymap_name_from_path "$candidate")"
-        candidate_name="${candidate_name,,}"
+            base="$(basename "$candidate")"
 
-        # Exact filename/keymap match.
-        if [ "$candidate_name" = "$requested" ]; then
-            exact_match="$candidate_name"
-            break
-        fi
+            # Strip common keymap extensions.
+            base="${base%.map.gz}"
+            base="${base%.map}"
+            base="${base%.bmap.gz}"
+            base="${base%.bmap}"
 
-        # Match the requested layout against the base component.
-        #
-        # Example:
-        #
-        #   requested = de
-        #   candidate = de-latin1
-        #
-        # This intentionally uses the installed keymap database rather than
-        # a hardcoded list of layouts.
-        candidate_base="${candidate_name%%-*}"
+            if [ "${base,,}" = "$requested" ]; then
+                found="$candidate"
+                break
+            fi
 
-        if [ "$candidate_base" = "$requested" ] \
-            && [ -z "$first_match" ]; then
+        done < <(
+            find "$keymap_root" \
+                -type f \
+                \( \
+                    -name '*.map' \
+                    -o -name '*.map.gz' \
+                    -o -name '*.bmap' \
+                    -o -name '*.bmap.gz' \
+                \) \
+                -print0 \
+                2>/dev/null
+        )
 
-            first_match="$candidate_name"
+        [ -n "$found" ] && break
 
-        fi
+    done < <(
+        printf '%s\n' \
+            "/run/current-system/sw/share/keymaps" \
+            "/usr/share/keymaps" \
+            "/usr/share/kbd/keymaps"
+    )
 
-    done < <(nhl_find_keymap_candidates | sort -u)
-
-    if [ -n "$exact_match" ]; then
-        printf '%s\n' "$exact_match"
-        return 0
-    fi
-
-    if [ -n "$first_match" ]; then
-        printf '%s\n' "$first_match"
+    if [ -n "$found" ]; then
+        printf '%s\n' "$found"
         return 0
     fi
 
     return 1
 }
 
-# ---------------------------------------------------------------------------
-# Show installed keymaps when resolution fails.
-# ---------------------------------------------------------------------------
-
-nhl_print_installed_keymaps() {
-
-    local keymap
-    local previous=""
-
-    echo "${NOTE} Installed console keymaps discovered on this system:"
-
-    while IFS= read -r keymap; do
-
-        [ -n "$keymap" ] || continue
-
-        if [ "$keymap" = "$previous" ]; then
-            continue
-        fi
-
-        printf '    %s\n' "$keymap"
-
-        previous="$keymap"
-
-    done < <(
-        nhl_find_keymap_candidates \
-            | while IFS= read -r path; do
-                nhl_keymap_name_from_path "$path"
-              done \
-            | sort -u
-    )
-}
-
-# ---------------------------------------------------------------------------
-# Keyboard prompt.
-# ---------------------------------------------------------------------------
-
 while true; do
 
     if type nhl_read_input >/dev/null 2>&1; then
 
-        keyboardInput=$(
+        keyboardLayout=$(
             nhl_read_input \
                 "$CAT Enter your keyboard layout: [ ${keyboardDefault} ] " \
                 "$keyboardDefault"
@@ -595,51 +455,31 @@ while true; do
 
         read -rp \
             "$CAT Enter your keyboard layout: [ ${keyboardDefault} ] " \
-            keyboardInput </dev/tty
+            keyboardLayout </dev/tty
 
-        if [ -z "$keyboardInput" ]; then
-            keyboardInput="$keyboardDefault"
+        if [ -z "$keyboardLayout" ]; then
+            keyboardLayout="$keyboardDefault"
         fi
 
     fi
 
-    keyboardInput="${keyboardInput,,}"
+    keyboardLayout="${keyboardLayout,,}"
 
-    # -----------------------------------------------------------------------
-    # Resolve against the installed kbd keymaps.
-    # -----------------------------------------------------------------------
+    # Resolve the requested layout against the actual installed keymap files.
+    resolved_keymap="$(nhl_resolve_keymap "$keyboardLayout" 2>/dev/null || true)"
 
-    if keyboardLayout="$(nhl_resolve_console_keymap "$keyboardInput")"; then
+    if [ -n "$resolved_keymap" ] \
+        && loadkeys --parse "$resolved_keymap" >/dev/null 2>&1; then
 
-        echo "$OK Keyboard layout verified: $keyboardInput"
-        echo "$OK Normalized console keymap: $keyboardLayout"
-
-        if [ "$keyboardInput" != "$keyboardLayout" ]; then
-
-            echo "$NOTE The entered layout was normalized using the"
-            echo "$NOTE keymaps actually installed on this system."
-
-        fi
-
+        echo "$OK Keyboard layout verified: $keyboardLayout"
         break
 
     fi
 
-    echo
-    echo "${WARN} Keyboard layout '$keyboardInput' could not be resolved."
-    echo "${NOTE} No hardcoded layout list is used."
-    echo "${NOTE} The installer searches the installed kbd keymaps dynamically."
-    echo
-
-    nhl_print_installed_keymaps
-
-    echo
+    echo "${WARN} Keyboard layout '$keyboardLayout' could not be resolved."
+    echo "${NOTE} Try one of the installed console keymaps."
 
 done
-
-# ===========================================================================
-# SAVE KEYBOARD CONFIGURATION
-# ===========================================================================
 
 variables_file="$hostDir/variables.nix"
 
@@ -896,13 +736,6 @@ echo "$OK Machine-local host configuration is complete."
 
 # ===========================================================================
 # FLAKE VALIDATION
-#
-# The validation distinguishes between:
-#
-#   - a missing nixosConfigurations attribute
-#   - a configuration that exists but fails evaluation
-#
-# Machine-local files are included through the path-based flake reference.
 # ===========================================================================
 
 echo "-----"
@@ -1061,7 +894,7 @@ if ! nix eval \
     echo
 
     echo "${WARN} Target:"
-    echo "    $flake_ref#$flake_config"
+    echo "    $flake_ref#$hostName"
 
     echo
 
