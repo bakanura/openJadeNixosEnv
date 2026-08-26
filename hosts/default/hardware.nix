@@ -9,12 +9,12 @@
   ...
 }: {
   imports = [
-    (modulesPath + "/profiles/qemu-guest.nix")
+    (modulesPath + "/installer/scan/not-detected.nix")
   ];
 
-  boot.initrd.availableKernelModules = ["ata_piix" "uhci_hcd" "virtio_pci" "virtio_scsi" "sd_mod" "sr_mod"];
+  boot.initrd.availableKernelModules = ["nvme" "xhci_pci" "ahci" "usbhid" "sd_mod"];
   boot.initrd.kernelModules = [];
-  boot.kernelModules = ["kvm-intel"];
+  boot.kernelModules = ["kvm-amd"]; # Change to "kvm-intel" if your machine uses an Intel CPU
   boot.extraModulePackages = [];
 
   fileSystems."/" = {
@@ -44,4 +44,7 @@
   ];
 
   nixpkgs.hostPlatform = lib.mkDefault "x86_64-linux";
+
+  # This allows NixOS to include proprietary Wi-Fi/Bluetooth firmware blobs 
+  hardware.enableRedistributableFirmware = true;
 }
