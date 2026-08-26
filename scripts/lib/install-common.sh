@@ -1049,7 +1049,22 @@ nhl_detect_timezone_auto() {
 }
 
 nhl_prompt_timezone_console() {
-  # Args: $1 = hostName, $2 = defaultKeyboardLayout
+  # Args:
+  #   $1 = hostName
+  #   $2 = default keyboard layout
+  #
+  # The keyboard layout here is the NixOS/XKB-style layout that is written
+  # directly to console.keyMap.
+  #
+  # IMPORTANT:
+  # Do NOT require nhl_resolve_console_keymap() here.
+  #
+  # "de" is a valid NixOS console.keyMap value even when the corresponding
+  # kbd keymap file cannot be resolved from the current machine's /nix/store.
+  #
+  # XKB keyboard layouts and kbd console keymaps are related namespaces but
+  # they are not identical filesystem lookups.
+
   local hostName="$1"
   local defKb="${2:-us}"
   local cfg=""
@@ -1060,124 +1075,198 @@ nhl_prompt_timezone_console() {
   local city=""
   local manualTz=""
   local consoleKeyMap=""
-  local resolvedKeyMap=""
+
+  # -------------------------------------------------------------------------
+  # TIMEZONE
+  # -------------------------------------------------------------------------
 
   if [ -n "${NHL_STATE_TIMEZONE:-}" ]; then
+
     timeZone="$NHL_STATE_TIMEZONE"
+
     echo "${OK} Using saved timezone from previous installer run: ${timeZone}"
+
   elif timeZone=$(nhl_detect_timezone_auto); then
+
     echo "${OK} Detected timezone automatically: ${timeZone}"
+
   else
+
     city=$(nhl_read_input \
       "Could not auto-detect timezone. Enter your current city (e.g. Mannheim): " \
       "")
 
     if [ -n "$city" ]; then
+
       timeZone=$(nhl_lookup_timezone_from_city "$city" || true)
 
       if [ -n "$timeZone" ]; then
         echo "${OK} Mapped city '${city}' to timezone: ${timeZone}"
       fi
+
     fi
+
   fi
 
+  # -------------------------------------------------------------------------
+  # Manual timezone fallback
+  # -------------------------------------------------------------------------
+
   if [ -z "$timeZone" ]; then
+
     manualTz=$(nhl_read_input \
       "Enter your timezone manually (e.g. Europe/Berlin), or leave blank for automatic service: [auto] " \
       "")
 
     timeZone="$manualTz"
+
   fi
 
+  # -------------------------------------------------------------------------
+  # Configure timezone
+  # -------------------------------------------------------------------------
+
   if [ -n "$timeZone" ]; then
+
     if grep -q 'time\.timeZone' "$cfg"; then
+
       nhl_sed_file \
         "$cfg" \
-        -e "s|time\.timeZone = \".*\";|time.timeZone = \"$timeZone\";|" ||
-        true
+        -e "s|time\.timeZone = \".*\";|time.timeZone = \"$timeZone\";|" \
+        || true
+
     else
+
       nhl_insert_option_before_closing_brace \
         "$cfg" \
         "time.timeZone = \"$timeZone\";"
+
     fi
 
+    # Explicit timezone means automatic timezone detection should be disabled.
     if grep -q 'services\.automatic-timezoned\.enable' "$cfg"; then
+
       nhl_sed_file \
         "$cfg" \
-        -e 's/services\.automatic-timezoned\.enable = [^;]*/services.automatic-timezoned.enable = false/' ||
-        true
+        -e 's/services\.automatic-timezoned\.enable = [^;]*/services.automatic-timezoned.enable = false/' \
+        || true
+
     else
+
       nhl_insert_option_before_closing_brace \
         "$cfg" \
         "services.automatic-timezoned.enable = false;"
+
     fi
+
   else
+
+    # No timezone selected -> allow automatic timezone detection.
     if grep -q 'services\.automatic-timezoned\.enable' "$cfg"; then
+
       nhl_sed_file \
         "$cfg" \
-        -e 's/services\.automatic-timezoned\.enable = [^;]*/services.automatic-timezoned.enable = true/' ||
-        true
+        -e 's/services\.automatic-timezoned\.enable = [^;]*/services.automatic-timezoned.enable = true/' \
+        || true
+
     else
+
       nhl_insert_option_before_closing_brace \
         "$cfg" \
         "services.automatic-timezoned.enable = true;"
+
     fi
 
     nhl_sed_file \
       "$cfg" \
-      -e '/time\.timeZone[[:space:]]*=/{d}' ||
-      true
+      -e '/time\.timeZone[[:space:]]*=/{d}' \
+      || true
+
   fi
 
-  # ------------------------------------------------------------
-  # Console keyboard layout
-  # ------------------------------------------------------------
+  # -------------------------------------------------------------------------
+  # CONSOLE KEYBOARD LAYOUT
+  #
+  # IMPORTANT:
+  #
+  # Do NOT call nhl_resolve_console_keymap() here.
+  #
+  # The installer already validates the keyboard layout syntactically.
+  # NixOS itself will resolve console.keyMap during configuration evaluation.
+  #
+  # This avoids machine-dependent failures such as:
+  #
+  #   machine A:
+  #     de -> /nix/store/.../kbd/.../de.map.gz
+  #
+  #   machine B:
+  #     de -> lookup failure
+  #
+  # even though "de" is a perfectly valid configuration value.
+  # -------------------------------------------------------------------------
 
   consoleKeyMap="${NHL_STATE_CONSOLE_KEYMAP:-$defKb}"
+  consoleKeyMap="${consoleKeyMap,,}"
 
-  # Resolve the actual kbd file.
-  resolvedKeyMap=$(nhl_resolve_console_keymap "$consoleKeyMap" || true)
+  # Basic validation only.
+  #
+  # This deliberately does NOT inspect /usr/share/keymaps or /nix/store.
+  if ! [[ "$consoleKeyMap" =~ ^[a-z][a-z0-9_-]*$ ]]; then
 
-  if [ -z "$resolvedKeyMap" ]; then
-    echo "${WARN} Saved/default console keymap '${consoleKeyMap}' was not found."
+    echo "${WARN} Invalid console keyboard layout '${consoleKeyMap}'."
 
     if nhl_is_noninteractive; then
-      echo "${ERROR} Cannot continue non-interactively with an invalid console keymap."
-      echo "${ERROR} Valid examples include: us, de, de-latin1, ru, ru-yawerty."
+
+      echo "${ERROR} Cannot continue non-interactively with an invalid console keyboard layout."
+
       return 1
+
     fi
 
     while true; do
+
       consoleKeyMap=$(
         nhl_read_input \
           "Enter console keyboard layout (e.g. us, de, de-latin1, ru): " \
           "$defKb"
       )
 
-      resolvedKeyMap=$(nhl_resolve_console_keymap "$consoleKeyMap" || true)
+      consoleKeyMap="${consoleKeyMap,,}"
 
-      if [ -n "$resolvedKeyMap" ]; then
+      if [[ "$consoleKeyMap" =~ ^[a-z][a-z0-9_-]*$ ]]; then
         break
       fi
 
-      echo "${WARN} Console keymap '${consoleKeyMap}' was not found."
-      echo "${INFO} Try one of: us, de, de-latin1, ru, ru-yawerty"
+      echo "${WARN} Invalid console keyboard layout '${consoleKeyMap}'."
+
     done
+
   fi
 
   echo "${OK} Console keymap: ${consoleKeyMap}"
-  echo "${INFO} Keymap file: ${resolvedKeyMap}"
+
+  # -------------------------------------------------------------------------
+  # Write console.keyMap
+  # -------------------------------------------------------------------------
 
   if grep -q 'console\.keyMap' "$cfg"; then
+
     nhl_sed_file \
       "$cfg" \
-      -e "s|console\.keyMap = \".*\";|console.keyMap = \"$consoleKeyMap\";|" ||
-      true
+      -e "s|console\.keyMap = \".*\";|console.keyMap = \"$consoleKeyMap\";|" \
+      || true
+
   else
+
     nhl_insert_option_before_closing_brace \
       "$cfg" \
       "console.keyMap = \"$consoleKeyMap\";"
+
   fi
+
+  # -------------------------------------------------------------------------
+  # Export installer state
+  # -------------------------------------------------------------------------
 
   export NHL_SELECTED_TIMEZONE="$timeZone"
   export NHL_SELECTED_CONSOLE_KEYMAP="$consoleKeyMap"
