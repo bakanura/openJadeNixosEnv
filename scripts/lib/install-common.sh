@@ -246,6 +246,85 @@ nhl_sanitize_hostname() {
   printf "%s\n" "$sanitized"
 }
 
+nhl_resolve_console_keymap() {
+  # Args: $1 = console keymap name
+  #
+  # Resolves a NixOS/kbd console keymap name to an actual keymap file.
+  #
+  # Examples:
+  #   de          -> .../share/keymaps/i386/qwertz/de.map.gz
+  #   de-latin1   -> .../share/keymaps/i386/qwertz/de-latin1.map.gz
+  #   ru          -> .../share/keymaps/i386/qwerty/ru.map.gz
+  #   ru-yawerty  -> .../share/keymaps/i386/qwerty/ru-yawerty.map.gz
+  #   us          -> .../share/keymaps/i386/qwerty/us.map.gz
+  #
+  # IMPORTANT:
+  #   Do not use `loadkeys -p "$file"` here.
+  #   The keymap files are valid even when loadkeys cannot resolve
+  #   their Nix store path/includes correctly.
+  #
+  # Return:
+  #   0 = keymap found
+  #   1 = keymap not found
+
+  local keymap="${1:-}"
+  local kbd=""
+  local keymaps_root=""
+  local found=""
+
+  if [ -z "$keymap" ]; then
+    return 1
+  fi
+
+  # Prevent path traversal / accidental path input.
+  if ! printf "%s" "$keymap" |
+    grep -qE '^[[:alnum:]_-]+$'; then
+    return 1
+  fi
+
+  # Prefer the Nixpkgs kbd package.
+  if command -v nix >/dev/null 2>&1; then
+    kbd=$(
+      NIX_CONFIG="experimental-features = nix-command flakes" \
+        nix eval --raw nixpkgs#kbd 2>/dev/null ||
+        true
+    )
+  fi
+
+  if [ -n "$kbd" ] &&
+     [ -d "$kbd/share/keymaps" ]; then
+
+    keymaps_root="$kbd/share/keymaps"
+  elif [ -d "/run/current-system/sw/share/keymaps" ]; then
+    keymaps_root="/run/current-system/sw/share/keymaps"
+  elif [ -d "/usr/share/keymaps" ]; then
+    keymaps_root="/usr/share/keymaps"
+  else
+    return 1
+  fi
+
+  found=$(
+    find "$keymaps_root" -type f \
+      \( \
+        -name "${keymap}.map" \
+        -o -name "${keymap}.map.gz" \
+        -o -name "${keymap}.map.bz2" \
+        -o -name "${keymap}.map.xz" \
+        -o -name "${keymap}.map.lz" \
+        -o -name "${keymap}.map.lz4" \
+        -o -name "${keymap}.map.zst" \
+      \) \
+      -print -quit 2>/dev/null
+  )
+
+  if [ -n "$found" ]; then
+    printf "%s\n" "$found"
+    return 0
+  fi
+
+  return 1
+}
+
 nhl_derive_hostname() {
   # Args: $1 = optional prefix (default: NixOS)
   local prefix="${1:-NixOS}"
@@ -975,11 +1054,13 @@ nhl_prompt_timezone_console() {
   local defKb="${2:-us}"
   local cfg=""
 
-  cfg=$(nhl_host_config_path "$hostName")
+  cfg=$(nhl_host_config_path "$hostName") || return 1
 
   local timeZone=""
   local city=""
   local manualTz=""
+  local consoleKeyMap=""
+  local resolvedKeyMap=""
 
   if [ -n "${NHL_STATE_TIMEZONE:-}" ]; then
     timeZone="$NHL_STATE_TIMEZONE"
@@ -1034,7 +1115,7 @@ nhl_prompt_timezone_console() {
     if grep -q 'services\.automatic-timezoned\.enable' "$cfg"; then
       nhl_sed_file \
         "$cfg" \
-        -e 's/services.automatic-timezoned.enable = [^;]*/services.automatic-timezoned.enable = true/' ||
+        -e 's/services\.automatic-timezoned\.enable = [^;]*/services.automatic-timezoned.enable = true/' ||
         true
     else
       nhl_insert_option_before_closing_brace \
@@ -1048,7 +1129,44 @@ nhl_prompt_timezone_console() {
       true
   fi
 
-  local consoleKeyMap="${NHL_STATE_CONSOLE_KEYMAP:-$defKb}"
+  # ------------------------------------------------------------
+  # Console keyboard layout
+  # ------------------------------------------------------------
+
+  consoleKeyMap="${NHL_STATE_CONSOLE_KEYMAP:-$defKb}"
+
+  # Resolve the actual kbd file.
+  resolvedKeyMap=$(nhl_resolve_console_keymap "$consoleKeyMap" || true)
+
+  if [ -z "$resolvedKeyMap" ]; then
+    echo "${WARN} Saved/default console keymap '${consoleKeyMap}' was not found."
+
+    if nhl_is_noninteractive; then
+      echo "${ERROR} Cannot continue non-interactively with an invalid console keymap."
+      echo "${ERROR} Valid examples include: us, de, de-latin1, ru, ru-yawerty."
+      return 1
+    fi
+
+    while true; do
+      consoleKeyMap=$(
+        nhl_read_input \
+          "Enter console keyboard layout (e.g. us, de, de-latin1, ru): " \
+          "$defKb"
+      )
+
+      resolvedKeyMap=$(nhl_resolve_console_keymap "$consoleKeyMap" || true)
+
+      if [ -n "$resolvedKeyMap" ]; then
+        break
+      fi
+
+      echo "${WARN} Console keymap '${consoleKeyMap}' was not found."
+      echo "${INFO} Try one of: us, de, de-latin1, ru, ru-yawerty"
+    done
+  fi
+
+  echo "${OK} Console keymap: ${consoleKeyMap}"
+  echo "${INFO} Keymap file: ${resolvedKeyMap}"
 
   if grep -q 'console\.keyMap' "$cfg"; then
     nhl_sed_file \
