@@ -15,8 +15,8 @@ in {
     ./hardware.nix
     ./users.nix
     ./packages-fonts.nix
-    ../../../modules/drivers
-    ../../../modules/hardware
+    ../../modules/drivers
+    ../../modules/hardware
   ];
 
   # Configure boot settings.
