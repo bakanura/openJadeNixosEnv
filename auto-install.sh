@@ -132,12 +132,14 @@ echo "-----"
 # ===========================================================================
 
 if [ ! -d "$localHostRoot" ]; then
+
     echo "$NOTE Creating machine-local host root..."
 
     mkdir -p "$localHostRoot"
 
     echo "$OK Created:"
     echo "    $localHostRoot"
+
 fi
 
 # ===========================================================================
@@ -359,56 +361,89 @@ if ! command -v loadkeys >/dev/null 2>&1; then
 fi
 
 # ---------------------------------------------------------------------------
-# Locate an installed console keymap dynamically.
+# Resolve a console keymap from the keymaps actually installed on the
+# current NixOS system.
 #
-# NixOS may keep keymaps below:
+# Resolution order:
 #
-#   /run/current-system/sw/share/keymaps
-#   /usr/share/keymaps
-#   /usr/share/kbd/keymaps
+#   1. Exact installed keymap name.
+#   2. Exact keymap file.
+#   3. A keymap whose name begins with "<requested>-".
 #
-# The entered value can therefore be either:
+# This allows, for example:
 #
-#   de
-#   de-latin1
-#   us
-#   uk
-#   ...
+#   de        -> de-latin1
 #
-# The actual installed keymap file is resolved before loadkeys is called.
+# when de-latin1 is the installed German keymap.
+#
+# The function returns the canonical keymap name suitable for:
+#
+#   loadkeys
+#   console.keyMap
+#   installer state
 # ---------------------------------------------------------------------------
 nhl_resolve_keymap() {
 
     local requested="${1,,}"
     local keymap_root
     local candidate
+    local relative
+    local filename
     local base
-    local found=""
+    local exact_match=""
+    local prefix_match=""
+    local prefix_base=""
 
-    # If the user supplied a path to an existing keymap, use it directly.
-    if [ -f "$requested" ]; then
+    [ -n "$requested" ] || return 1
+
+    # Direct loadkeys resolution is preferred.
+    # This handles keymaps that kbd can resolve through its own search path.
+    if loadkeys --parse "$requested" >/dev/null 2>&1; then
         printf '%s\n' "$requested"
         return 0
     fi
 
-    # Search all likely system keymap locations.
     while IFS= read -r keymap_root; do
 
         [ -d "$keymap_root" ] || continue
 
         while IFS= read -r -d '' candidate; do
 
-            base="$(basename "$candidate")"
+            filename="$(basename "$candidate")"
 
-            # Strip common keymap extensions.
-            base="${base%.map.gz}"
-            base="${base%.map}"
-            base="${base%.bmap.gz}"
-            base="${base%.bmap}"
+            base="$filename"
 
-            if [ "${base,,}" = "$requested" ]; then
-                found="$candidate"
+            case "$base" in
+                *.map.gz)
+                    base="${base%.map.gz}"
+                    ;;
+                *.map)
+                    base="${base%.map}"
+                    ;;
+                *.bmap.gz)
+                    base="${base%.bmap.gz}"
+                    ;;
+                *.bmap)
+                    base="${base%.bmap}"
+                    ;;
+            esac
+
+            base="${base,,}"
+
+            # Exact match wins.
+            if [ "$base" = "$requested" ]; then
+                exact_match="$candidate"
                 break
+            fi
+
+            # Otherwise remember the first requested-* match.
+            prefix_base="${requested}-"
+
+            if [[ "$base" == "$prefix_base"* ]] \
+                && [ -z "$prefix_match" ]; then
+
+                prefix_match="$candidate"
+
             fi
 
         done < <(
@@ -421,10 +456,13 @@ nhl_resolve_keymap() {
                     -o -name '*.bmap.gz' \
                 \) \
                 -print0 \
-                2>/dev/null
+                2>/dev/null \
+                | sort -z
         )
 
-        [ -n "$found" ] && break
+        if [ -n "$exact_match" ]; then
+            break
+        fi
 
     done < <(
         printf '%s\n' \
@@ -433,9 +471,45 @@ nhl_resolve_keymap() {
             "/usr/share/kbd/keymaps"
     )
 
-    if [ -n "$found" ]; then
-        printf '%s\n' "$found"
+    # Use an exact file match if one exists.
+    if [ -n "$exact_match" ]; then
+
+        candidate="$exact_match"
+
+    elif [ -n "$prefix_match" ]; then
+
+        candidate="$prefix_match"
+
+    else
+
+        return 1
+
+    fi
+
+    filename="$(basename "$candidate")"
+    base="$filename"
+
+    case "$base" in
+        *.map.gz)
+            base="${base%.map.gz}"
+            ;;
+        *.map)
+            base="${base%.map}"
+            ;;
+        *.bmap.gz)
+            base="${base%.bmap.gz}"
+            ;;
+        *.bmap)
+            base="${base%.bmap}"
+            ;;
+    esac
+
+    # Final validation against the actual keymap file.
+    if loadkeys --parse "$candidate" >/dev/null 2>&1; then
+
+        printf '%s\n' "$base"
         return 0
+
     fi
 
     return 1
@@ -465,11 +539,14 @@ while true; do
 
     keyboardLayout="${keyboardLayout,,}"
 
-    # Resolve the requested layout against the actual installed keymap files.
-    resolved_keymap="$(nhl_resolve_keymap "$keyboardLayout" 2>/dev/null || true)"
+    # Resolve the requested layout to the actual installed console keymap.
+    resolved_keymap="$(
+        nhl_resolve_keymap "$keyboardLayout" 2>/dev/null || true
+    )"
 
-    if [ -n "$resolved_keymap" ] \
-        && loadkeys --parse "$resolved_keymap" >/dev/null 2>&1; then
+    if [ -n "$resolved_keymap" ]; then
+
+        keyboardLayout="$resolved_keymap"
 
         echo "$OK Keyboard layout verified: $keyboardLayout"
         break
@@ -477,9 +554,12 @@ while true; do
     fi
 
     echo "${WARN} Keyboard layout '$keyboardLayout' could not be resolved."
-    echo "${NOTE} Try one of the installed console keymaps."
 
 done
+
+# ===========================================================================
+# WRITE KEYBOARD LAYOUT
+# ===========================================================================
 
 variables_file="$hostDir/variables.nix"
 
