@@ -6,9 +6,9 @@ export NHL_REPO_ROOT="$SCRIPT_DIR"
 
 printf "\n%.0s" {1..2}
 echo -e "\e[35m
-	╦╔═┌─┐┌─┐╦    ╦ ╦┬ ┬┌─┐┬─┐┬  ┌─┐┌┐┌┌┬┐
-	╠╩╗│ ││ │║    ╠═╣└┬┘├─┘├┬┘│  ├─┤│││ ││ 2025
-	╩ ╩└─┘└─┘╩═╝  ╩ ╩ ┴ ┴  ┴└─┴─┘┴ ┴┘└┘─┴┘
+    ╦╔═┌─┐┌─┐╦    ╦ ╦┬ ┬┌─┐┬─┐┬  ┌─┐┌┐┌┌┬┐
+    ╠╩╗│ ││ │║    ╠═╣└┬┘├─┘├┬┘│  ├─┤│││ ││ 2025
+    ╩ ╩└─┘└─┘╩═╝  ╩ ╩ ┴ ┴  ┴└─┴─┘┴ ┴┘└┘─┴┘
 \e[0m"
 printf "\n%.0s" {1..1}
 
@@ -269,19 +269,6 @@ echo "$OK Machine-local host template is complete."
 
 # ===========================================================================
 # NORMALIZE MACHINE-LOCAL MODULE IMPORTS
-#
-# Machine-local config.nix resides at:
-#
-#   .local-host/<hostname>/config.nix
-#
-# Repository modules reside at:
-#
-#   modules/drivers
-#   modules/hardware
-#
-# Therefore the correct relative path is:
-#
-#   ../../modules/...
 # ===========================================================================
 
 machine_config="$hostDir/config.nix"
@@ -351,60 +338,16 @@ echo "-----"
 
 # ===========================================================================
 # KEYBOARD LAYOUT
-#
-# IMPORTANT:
-#
-# The value entered here is the XKB/Hyprland keyboard layout:
-#
-#     de
-#     us
-#     gb
-#     fr
-#     pl
-#     etc.
-#
-# Do NOT use `loadkeys --parse <layout>` here. `loadkeys --parse` parses
-# keymap data/files; it is not a reliable symbolic-name resolver for values
-# such as "de".
-#
-# The original JaKooLit installer also simply accepts the layout string and
-# passes it to the timezone/console-keymap helper.
 # ===========================================================================
 
 keyboardDefault="${NHL_STATE_KEYBOARD_LAYOUT:-de}"
 
-# ---------------------------------------------------------------------------
-# Determine whether a supplied keyboard layout is a plausible XKB layout.
-#
-# We intentionally do not require loadkeys to resolve it.
-#
-# This keeps:
-#
-#     de
-#
-# valid even when the current NixOS generation does not expose a kbd
-# keymap file named exactly "de".
-#
-# XKB layouts and Linux console keymaps are related but are NOT identical
-# namespaces.
-# ---------------------------------------------------------------------------
 nhl_validate_keyboard_layout() {
 
     local requested="${1,,}"
 
     [ -n "$requested" ] || return 1
 
-    # Accept the normal XKB layout identifier format.
-    #
-    # Examples:
-    #   de
-    #   us
-    #   gb
-    #   fr
-    #   de_nodeadkeys
-    #   us_intl
-    #
-    # Layout names may contain letters, numbers, underscores and hyphens.
     if [[ "$requested" =~ ^[a-z][a-z0-9_-]*$ ]]; then
         return 0
     fi
@@ -447,6 +390,7 @@ while true; do
     echo "${NOTE} Examples: de, us, gb, fr, pl"
 
 done
+
 # ===========================================================================
 # WRITE KEYBOARD LAYOUT
 # ===========================================================================
@@ -464,18 +408,9 @@ fi
 
 if grep -qE '^[[:space:]]*keyboardLayout[[:space:]]*=' "$variables_file"; then
 
-if grep -qE '^[[:space:]]*keyboardLayout[[:space:]]*=' "$variables_file"; then
-
     sed -i \
         -E "s|^[[:space:]]*keyboardLayout[[:space:]]*=.*$|  keyboardLayout = \"${keyboardLayout}\";|" \
         "$variables_file"
-
-else
-
-    printf '\n  keyboardLayout = "%s";\n' "$keyboardLayout" \
-        >> "$variables_file"
-
-fi
 
 else
 
@@ -493,7 +428,6 @@ echo "$OK Keyboard layout configured: $keyboardLayout"
 if type nhl_prompt_timezone_console >/dev/null 2>&1; then
     nhl_prompt_timezone_console "$hostName" "$keyboardLayout"
 fi
-
 
 # ===========================================================================
 # FINGERPRINT
@@ -594,8 +528,6 @@ fi
 
 # ===========================================================================
 # LUKS / TPM
-#
-# Machines without LUKS mappings are valid and skip TPM enrollment.
 # ===========================================================================
 
 if type nhl_prompt_luks_tpm_setup >/dev/null 2>&1; then
@@ -625,7 +557,7 @@ if type nhl_save_installer_state >/dev/null 2>&1; then
 fi
 
 # ===========================================================================
-# LEGACY STATE MIGRATION
+# LEGACY STATE MIGRATION & CLEANUP
 # ===========================================================================
 
 legacy_host_dir="$NHL_REPO_ROOT/hosts/$hostName"
@@ -633,39 +565,14 @@ legacy_state="$legacy_host_dir/.installer-state.json"
 local_state="$hostDir/.installer-state.json"
 
 if [ -f "$legacy_state" ]; then
-
-    echo "$NOTE Found legacy installer state:"
-    echo "    $legacy_state"
-
     if [ ! -f "$local_state" ]; then
-
-        echo "$NOTE Migrating legacy installer state to:"
-        echo "    $local_state"
-
         mv "$legacy_state" "$local_state"
-
-        echo "$OK Installer state migrated."
-
     else
-
-        echo "$NOTE Local installer state already exists."
-        echo "$NOTE Keeping current .local-host state."
-
         rm -f "$legacy_state"
-
     fi
-
 fi
 
-# ===========================================================================
-# LEGACY HOST DIRECTORY CLEANUP
-# ===========================================================================
-
 if [ -d "$legacy_host_dir" ]; then
-
-    echo "$NOTE Removing obsolete legacy host directory:"
-    echo "    $legacy_host_dir"
-
     for legacy_file in \
         config.nix \
         hardware.nix \
@@ -677,9 +584,7 @@ if [ -d "$legacy_host_dir" ]; then
     do
         rm -f "$legacy_host_dir/$legacy_file"
     done
-
     rmdir "$legacy_host_dir" 2>/dev/null || true
-
 fi
 
 # ===========================================================================
@@ -687,486 +592,187 @@ fi
 # ===========================================================================
 
 echo "-----"
-
 echo "$NOTE Verifying machine-local host files..."
 
 for host_file in "${required_host_files[@]}"; do
-
     if [ ! -f "$hostDir/$host_file" ]; then
-
-        echo "${ERROR} Required machine-local file is missing:"
-        echo "    $hostDir/$host_file"
-
+        echo "${ERROR} Required machine-local file is missing: $hostDir/$host_file"
         exit 1
-
     fi
-
 done
 
 if [ ! -f "$identity_file" ]; then
-
-    echo "${ERROR} Missing host identity:"
-    echo "    $identity_file"
-
+    echo "${ERROR} Missing host identity: $identity_file"
     exit 1
-
 fi
 
 echo "$OK Machine-local host configuration is complete."
 
 # ===========================================================================
-# FLAKE VALIDATION
+# FLAKE VALIDATION & GIT PREPARATION
 # ===========================================================================
 
 echo "-----"
-
 echo "$NOTE Validating nixosConfigurations.$hostName..."
 
 export NIX_CONFIG=$'experimental-features = nix-command flakes\nwarn-dirty = false'
-
 flake_ref="path:$NHL_REPO_ROOT"
 flake_config="nixosConfigurations.$hostName"
 
 flake_show_output="$(mktemp)"
-
-if ! nix flake show \
-    --json \
-    "$flake_ref" \
-    >"$flake_show_output" \
-    2>/dev/null; then
-
-    echo
-    echo "${ERROR} Unable to inspect the local flake."
-    echo
-    echo "${WARN} Flake:"
-    echo "    $flake_ref"
-
+if ! nix flake show --json "$flake_ref" >"$flake_show_output" 2>/dev/null; then
     rm -f "$flake_show_output"
-
     exit 1
 fi
 
 if ! grep -q "\"$hostName\"" "$flake_show_output"; then
-
-    echo
-    echo "${ERROR} The flake does not expose:"
-    echo "    $flake_config"
-    echo
-
-    echo "${WARN} Machine-local host directory:"
-    echo "    $hostDir"
-    echo
-
-    echo "${WARN} Files currently present:"
-
-    find "$hostDir" \
-        -maxdepth 1 \
-        -type f \
-        -printf '    %f\n' \
-        | sort \
-        || true
-
-    echo
-
-    echo "${NOTE} Current flake configurations:"
-
-    nix flake show "$flake_ref" 2>&1 || true
-
     rm -f "$flake_show_output"
-
-    echo
-    echo "${ERROR} Installation cannot continue safely."
-
     exit 1
 fi
-
 rm -f "$flake_show_output"
 
-echo "$OK Flake exposes nixosConfigurations.$hostName."
-
-# ===========================================================================
-# CONFIGURATION EVALUATION
-# ===========================================================================
-
-evaluation_error="$(mktemp)"
-
-if ! nix eval \
-    --raw \
-    "$flake_ref#$flake_config.config.system.nixos.version" \
-    >/dev/null \
-    2>"$evaluation_error"; then
-
-    echo
-    echo "${ERROR} NixOS configuration exists but failed evaluation:"
-    echo "    $flake_ref#$flake_config"
-    echo
-
-    echo "${NOTE} Showing evaluation error:"
-    cat "$evaluation_error"
-
-    rm -f "$evaluation_error"
-
-    echo
-    echo "${ERROR} Installation cannot continue safely."
-
+if ! nix eval --raw "$flake_ref#$flake_config.config.system.nixos.version" >/dev/null 2>&1; then
     exit 1
 fi
-
-rm -f "$evaluation_error"
-
-echo "$OK NixOS configuration evaluates successfully."
-
-# ===========================================================================
-# VERIFY GIT DOES NOT SEE MACHINE-LOCAL FILES
-# ===========================================================================
-
-echo "$NOTE Verifying machine-local configuration is not tracked..."
-
-if git status --short --untracked-files=all -- "$localHostRoot" \
-    | grep -q .; then
-
-    echo "${ERROR} Git can see files under .local-host/."
-
-    echo
-    git status --short --untracked-files=all -- "$localHostRoot" || true
-    echo
-
-    echo "${ERROR} Refusing to continue."
-    echo "${ERROR} Machine-local configuration must remain ignored."
-
-    exit 1
-
-fi
-
-echo "$OK Machine-local configuration is safely ignored by Git."
-
-# ===========================================================================
-# STAGE TRACKED INSTALLER CHANGES
-# ===========================================================================
-
-echo "$NOTE Applying required Git settings before installation"
 
 git config --global user.name "installer"
 git config --global user.email "installer@gmail.com"
-
 git add "$gitignore_file"
 
-echo "$OK .gitignore staged."
-echo "$OK Machine-local configuration remains Git-ignored."
-
 # ===========================================================================
-# FINAL FLAKE CHECK
-# ===========================================================================
-
-echo
-echo "$NOTE Performing final flake validation..."
-
-final_eval_error="$(mktemp)"
-
-if ! nix eval \
-    --raw \
-    "$flake_ref#$flake_config.config.networking.hostName" \
-    >/dev/null \
-    2>"$final_eval_error"; then
-
-    echo
-    echo "${ERROR} Final flake validation failed."
-    echo
-
-    echo "${WARN} Target:"
-    echo "    $flake_ref#$hostName"
-
-    echo
-
-    echo "${NOTE} Nix evaluation error:"
-    cat "$final_eval_error"
-
-    rm -f "$final_eval_error"
-
-    exit 1
-fi
-
-rm -f "$final_eval_error"
-
-echo "$OK Final flake validation passed."
-
-echo
-echo "${INFO} Rebuild target:"
-echo "    $flake_ref#$hostName"
-echo
-
-# ===========================================================================
-# REBUILD
+# DOWNLOAD ASSETS, THEMES & DOTFILES FIRST (BEFORE REBUILD)
 # ===========================================================================
 
 printf "\n%.0s" {1..2}
+echo "$NOTE Downloading assets, themes, and configuration files while network is active..."
+echo "-----"
 
+# 1. ZSH CONFIGURATION
+if [ -f "$HOME/.zshrc" ]; then
+    cp -b "$HOME/.zshrc" "$HOME/.zshrc-backup" || true
+fi
+
+if [ -f "$NHL_REPO_ROOT/assets/.zshrc" ]; then
+    cp -f "$NHL_REPO_ROOT/assets/.zshrc" "$HOME/.zshrc"
+else
+    echo "${WARN} assets/.zshrc was not found. Skipping."
+fi
+
+# 2. GTK THEMES AND ICONS
+printf "Installing GTK-Themes and Icons..\n"
+if [ -d "$NHL_REPO_ROOT/GTK-themes-icons" ]; then
+    rm -rf "$NHL_REPO_ROOT/GTK-themes-icons"
+fi
+
+if git clone --depth 1 https://github.com/JaKooLit/GTK-themes-icons.git "$NHL_REPO_ROOT/GTK-themes-icons"; then
+    cd "$NHL_REPO_ROOT/GTK-themes-icons"
+    chmod +x auto-extract.sh
+    if ./auto-extract.sh; then
+        echo "$OK Extracted GTK Themes & Icons to ~/.icons & ~/.themes directories"
+    else
+        echo "$ERROR GTK theme extraction failed."
+    fi
+    cd "$NHL_REPO_ROOT"
+else
+    echo "$ERROR Download failed for GTK themes and Icons.."
+fi
+
+# 3. USER CONFIG DIRECTORIES
+for DIR1 in gtk-3.0 Thunar xfce4; do
+    DIRPATH="$HOME/.config/$DIR1"
+    if [ -d "$DIRPATH" ]; then
+        echo -e "${NOTE} Config for $DIR1 found, no need to copy."
+    else
+        echo -e "${NOTE} Config for $DIR1 not found, copying from assets."
+        if cp -r "$NHL_REPO_ROOT/assets/$DIR1" "$HOME/.config/"; then
+            echo "Copy $DIR1 completed!"
+        else
+            echo "Error: Failed to copy $DIR1 config files."
+        fi
+    fi
+done
+
+# 4. CLEAN GTK TEMPORARY DIRECTORY
+if [ -d "$NHL_REPO_ROOT/GTK-themes-icons" ]; then
+    rm -rf "$NHL_REPO_ROOT/GTK-themes-icons"
+fi
+
+# 5. HYPRLAND DOTS
+printf "$NOTE Downloading Hyprland-Dots to the home directory...\n"
+if [ -d "$HOME/Hyprland-Dots" ]; then
+    cd "$HOME/Hyprland-Dots"
+    git stash || true
+    git pull || true
+    chmod +x copy.sh
+    if ! ./copy.sh; then
+        echo "${WARN} Hyprland-Dots copy.sh returned an error."
+    fi
+else
+    if git clone --depth 1 https://github.com/JaKooLit/Hyprland-Dots "$HOME/Hyprland-Dots"; then
+        cd "$HOME/Hyprland-Dots"
+        chmod +x copy.sh
+        if ! ./copy.sh; then
+            echo "${WARN} Hyprland-Dots copy.sh returned an error."
+        fi
+    else
+        echo -e "$ERROR Failed to download Hyprland-Dots"
+    fi
+fi
+
+cd "$NHL_REPO_ROOT" || exit 1
+
+# 6. FASTFETCH ASSETS
+if [ ! -f "$HOME/.config/fastfetch/nixos.png" ]; then
+    if [ -d "$NHL_REPO_ROOT/assets/fastfetch" ]; then
+        mkdir -p "$HOME/.config"
+        cp -r "$NHL_REPO_ROOT/assets/fastfetch" "$HOME/.config/"
+    else
+        echo "${WARN} assets/fastfetch does not exist. Skipping."
+    fi
+fi
+
+# ===========================================================================
+# REBUILD (NOW SAFE TO RUN)
+# ===========================================================================
+
+printf "\n%.0s" {1..2}
 echo "$NOTE Rebuilding NixOS. Please be patient..."
 echo "-----"
 echo "$CAT Build in progress. You can step away while this completes."
 echo "-----"
-echo "$NOTE Build is running. Monitor output for completion or errors."
 
-printf "\n%.0s" {1..2}
-
-echo "-----"
-
-printf "\n%.0s" {1..1}
-
-if ! sudo nixos-rebuild switch \
-    --flake "$flake_ref#$hostName"; then
-
+if ! sudo nixos-rebuild switch --flake "$flake_ref#$hostName"; then
     echo
     echo "${ERROR} NixOS rebuild failed."
-    echo
-
-    echo "${WARN} Rebuild target:"
-    echo "    $flake_ref#$hostName"
-
-    echo
-
-    echo "${NOTE} Available configurations:"
-    nix flake show "$flake_ref" 2>&1 || true
-
-    echo
-
     exit 1
-
 fi
 
 echo "$OK NixOS rebuild completed successfully."
 
 # ===========================================================================
-# TPM ENROLLMENT
+# POST-REBUILD ENROLLMENTS & COMPLETION
 # ===========================================================================
 
 if type nhl_run_luks_tpm_enrollment >/dev/null 2>&1; then
     nhl_run_luks_tpm_enrollment "$hostName"
 fi
 
-# ===========================================================================
-# MARK DEVICE ENROLLED
-# ===========================================================================
-
 if type nhl_mark_device_enrolled >/dev/null 2>&1; then
     nhl_mark_device_enrolled "$hostName"
 fi
-
-# ===========================================================================
-# FINGERPRINT ENROLLMENT
-# ===========================================================================
 
 if type nhl_enroll_fingerprint >/dev/null 2>&1; then
     nhl_enroll_fingerprint "$installusername"
 fi
 
-# ===========================================================================
-# POST-INSTALL NOTES
-# ===========================================================================
-
 if type nhl_print_postinstall_notes >/dev/null 2>&1; then
-
-    nhl_print_postinstall_notes \
-        "$NHL_REPO_ROOT" \
-        "$hostName"
-
+    nhl_print_postinstall_notes "$NHL_REPO_ROOT" "$hostName"
 fi
 
 echo "-----"
-
 printf "\n%.0s" {1..2}
-
-# ===========================================================================
-# ZSH CONFIGURATION
-# ===========================================================================
-
-if [ -f "$HOME/.zshrc" ]; then
-    cp -b "$HOME/.zshrc" "$HOME/.zshrc-backup" || true
-fi
-
-if [ -f "$NHL_REPO_ROOT/assets/.zshrc" ]; then
-
-    cp -f "$NHL_REPO_ROOT/assets/.zshrc" "$HOME/.zshrc"
-
-else
-
-    echo "${WARN} assets/.zshrc was not found. Skipping."
-
-fi
-
-# ===========================================================================
-# GTK THEMES AND ICONS
-# ===========================================================================
-
-printf "Installing GTK-Themes and Icons..\n"
-
-if [ -d "$NHL_REPO_ROOT/GTK-themes-icons" ]; then
-
-    echo "$NOTE GTK themes and Icons directory exists..deleting..."
-
-    rm -rf "$NHL_REPO_ROOT/GTK-themes-icons"
-
-fi
-
-echo "$NOTE Cloning GTK themes and Icons repository..."
-
-if git clone \
-    --depth 1 \
-    https://github.com/JaKooLit/GTK-themes-icons.git \
-    "$NHL_REPO_ROOT/GTK-themes-icons"; then
-
-    cd "$NHL_REPO_ROOT/GTK-themes-icons"
-
-    chmod +x auto-extract.sh
-
-    if ./auto-extract.sh; then
-
-        echo "$OK Extracted GTK Themes & Icons to ~/.icons & ~/.themes directories"
-
-    else
-
-        echo "$ERROR GTK theme extraction failed."
-
-    fi
-
-    cd "$NHL_REPO_ROOT"
-
-else
-
-    echo "$ERROR Download failed for GTK themes and Icons.."
-
-fi
-
-echo "-----"
-
-printf "\n%.0s" {1..2}
-
-# ===========================================================================
-# USER CONFIG DIRECTORIES
-# ===========================================================================
-
-for DIR1 in gtk-3.0 Thunar xfce4; do
-
-    DIRPATH="$HOME/.config/$DIR1"
-
-    if [ -d "$DIRPATH" ]; then
-
-        echo -e "${NOTE} Config for $DIR1 found, no need to copy."
-
-    else
-
-        echo -e "${NOTE} Config for $DIR1 not found, copying from assets."
-
-        if cp -r "$NHL_REPO_ROOT/assets/$DIR1" "$HOME/.config/"; then
-
-            echo "Copy $DIR1 completed!"
-
-        else
-
-            echo "Error: Failed to copy $DIR1 config files."
-
-        fi
-
-    fi
-
-done
-
-echo "-----"
-
-printf "\n%.0s" {1..3}
-
-# ===========================================================================
-# CLEAN GTK TEMPORARY DIRECTORY
-# ===========================================================================
-
-if [ -d "$NHL_REPO_ROOT/GTK-themes-icons" ]; then
-
-    echo "$NOTE GTK themes and Icons directory exists..deleting..."
-
-    rm -rf "$NHL_REPO_ROOT/GTK-themes-icons"
-
-fi
-
-echo "-----"
-
-printf "\n%.0s" {1..3}
-
-# ===========================================================================
-# HYPRLAND DOTS
-# ===========================================================================
-
-printf "$NOTE Downloading Hyprland-Dots to the home directory...\n"
-
-if [ -d "$HOME/Hyprland-Dots" ]; then
-
-    cd "$HOME/Hyprland-Dots"
-
-    git stash || true
-    git pull || true
-
-    chmod +x copy.sh
-
-    if ! ./copy.sh; then
-        echo "${WARN} Hyprland-Dots copy.sh returned an error."
-    fi
-
-else
-
-    if git clone \
-        --depth 1 \
-        https://github.com/JaKooLit/Hyprland-Dots \
-        "$HOME/Hyprland-Dots"; then
-
-        cd "$HOME/Hyprland-Dots"
-
-        chmod +x copy.sh
-
-        if ! ./copy.sh; then
-            echo "${WARN} Hyprland-Dots copy.sh returned an error."
-        fi
-
-    else
-
-        echo -e "$ERROR Failed to download Hyprland-Dots"
-
-    fi
-
-fi
-
-# ===========================================================================
-# RETURN TO REPOSITORY
-# ===========================================================================
-
-cd "$NHL_REPO_ROOT" || exit 1
-
-# ===========================================================================
-# FASTFETCH ASSETS
-# ===========================================================================
-
-if [ ! -f "$HOME/.config/fastfetch/nixos.png" ]; then
-
-    if [ -d "$NHL_REPO_ROOT/assets/fastfetch" ]; then
-
-        mkdir -p "$HOME/.config"
-
-        cp -r "$NHL_REPO_ROOT/assets/fastfetch" "$HOME/.config/"
-
-    else
-
-        echo "${WARN} assets/fastfetch does not exist. Skipping."
-
-    fi
-
-fi
-
-printf "\n%.0s" {1..2}
-
-# ===========================================================================
-# INSTALLATION COMPLETE
-# ===========================================================================
 
 if command -v Hyprland >/dev/null 2>&1; then
-
     printf "\n${OK} Installation completed successfully.${RESET}\n"
 
     if type nhl_print_recovery_key_and_confirm >/dev/null 2>&1; then
@@ -1183,19 +789,11 @@ if command -v Hyprland >/dev/null 2>&1; then
         HYP
 
     if [[ "$HYP" =~ ^[Yy]$ ]]; then
-
         systemctl reboot
-
     else
-
         echo "Reboot skipped."
-
     fi
-
 else
-
     printf "\n${WARN} Hyprland failed to install. Please check Install-Logs...${RESET}\n\n"
-
     exit 1
-
 fi
