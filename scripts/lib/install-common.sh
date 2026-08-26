@@ -1450,15 +1450,22 @@ nhl_host_variables_path() {
 
 nhl_host_hardware_path() {
   # Args: $1 = hostName
+  #
+  # Generated/installed hosts live under .local-hosts/.
+  # hosts/default is ONLY the template and must never be used as a
+  # fallback for host-specific hardware detection.
   local hostName="$1"
   local hw="./.local-hosts/$hostName/hardware.nix"
 
   if [ ! -f "$hw" ]; then
-    hw="./hosts/default/hardware.nix"
+    echo "[ERROR] Host hardware configuration not found: $hw" >&2
+    echo "[ERROR] Refusing to fall back to hosts/default/hardware.nix." >&2
+    return 1
   fi
 
   printf "%s\n" "$hw"
 }
+
 
 nhl_extract_luks_name_from_hardware() {
   # Args: $1 = hostName
