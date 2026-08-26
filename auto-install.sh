@@ -447,7 +447,6 @@ while true; do
     echo "${NOTE} Examples: de, us, gb, fr, pl"
 
 done
-
 # ===========================================================================
 # WRITE KEYBOARD LAYOUT
 # ===========================================================================
@@ -485,6 +484,7 @@ echo "$OK Keyboard layout configured: $keyboardLayout"
 if type nhl_prompt_timezone_console >/dev/null 2>&1; then
     nhl_prompt_timezone_console "$hostName" "$keyboardLayout"
 fi
+
 
 # ===========================================================================
 # FINGERPRINT
