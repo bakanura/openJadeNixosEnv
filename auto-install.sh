@@ -1,5 +1,3 @@
-# Project source: https://github.com/LinuxBeginnings/NixOS-Hyprland
-
 #!/usr/bin/env bash
 clear
 
@@ -269,19 +267,6 @@ echo "$OK Machine-local host template is complete."
 
 # ===========================================================================
 # NORMALIZE MACHINE-LOCAL MODULE IMPORTS
-#
-# Machine-local config.nix resides at:
-#
-#   .local-host/<hostname>/config.nix
-#
-# Repository modules reside at:
-#
-#   modules/drivers
-#   modules/hardware
-#
-# Therefore the correct relative path is:
-#
-#   ../../modules/...
 # ===========================================================================
 
 machine_config="$hostDir/config.nix"
@@ -351,14 +336,147 @@ echo "-----"
 
 # ===========================================================================
 # KEYBOARD LAYOUT
+#
+# IMPORTANT:
+#
+# "de" is commonly used as a logical/layout name, but the console keymap
+# available to loadkeys may be "de-latin1".
+#
+# We therefore:
+#
+#   1. Normalize common aliases.
+#   2. Try loadkeys --parse.
+#   3. Search installed keymap directories.
+#   4. Store the actual working keymap.
+#
+# This prevents the installer from looping forever on:
+#
+#   Enter your keyboard layout: [ de ]
+#   Keyboard layout 'de' could not be verified...
 # ===========================================================================
 
 keyboardDefault="${NHL_STATE_KEYBOARD_LAYOUT:-de-latin1}"
 
 if ! command -v loadkeys >/dev/null 2>&1; then
     echo "${ERROR} loadkeys is required to validate keyboard layouts."
+    echo "${ERROR} Please ensure the kbd package is available."
     exit 1
 fi
+
+# ---------------------------------------------------------------------------
+# Resolve an installed console keymap.
+# ---------------------------------------------------------------------------
+nhl_resolve_keyboard_layout() {
+
+    local requested="${1,,}"
+    local candidate
+    local keymap_dir
+    local keymap_file
+
+    # Common aliases.
+    case "$requested" in
+        de)
+            requested="de-latin1"
+            ;;
+        de_DE)
+            requested="de-latin1"
+            ;;
+        german)
+            requested="de-latin1"
+            ;;
+        en)
+            requested="us"
+            ;;
+        en_US)
+            requested="us"
+            ;;
+        uk)
+            requested="uk"
+            ;;
+    esac
+
+    # First try loadkeys' normal keymap search path.
+    if loadkeys --parse "$requested" >/dev/null 2>&1; then
+        printf '%s\n' "$requested"
+        return 0
+    fi
+
+    # Search common keymap locations used by Linux/NixOS.
+    for keymap_dir in \
+        "/run/current-system/sw/share/keymaps" \
+        "/run/current-system/sw/share/kbd/keymaps" \
+        "/usr/share/keymaps" \
+        "/usr/share/kbd/keymaps" \
+        "/usr/share/console-setup"
+
+    do
+
+        [ -d "$keymap_dir" ] || continue
+
+        # Exact requested name.
+        for keymap_file in \
+            "$keymap_dir/$requested" \
+            "$keymap_dir/$requested.map" \
+            "$keymap_dir/$requested.map.gz" \
+            "$keymap_dir/$requested.bmap" \
+            "$keymap_dir/$requested.bmap.gz"
+        do
+
+            if [ -f "$keymap_file" ]; then
+
+                if loadkeys --parse "$keymap_file" >/dev/null 2>&1; then
+                    printf '%s\n' "$keymap_file"
+                    return 0
+                fi
+
+            fi
+
+        done
+
+        # Recursive lookup for layouts such as de-latin1.map.gz.
+        keymap_file="$(
+            find "$keymap_dir" \
+                -type f \
+                \( \
+                    -name "${requested}" \
+                    -o -name "${requested}.map" \
+                    -o -name "${requested}.map.gz" \
+                    -o -name "${requested}.bmap" \
+                    -o -name "${requested}.bmap.gz" \
+                \) \
+                -print -quit 2>/dev/null
+        )"
+
+        if [ -n "$keymap_file" ]; then
+
+            if loadkeys --parse "$keymap_file" >/dev/null 2>&1; then
+                printf '%s\n' "$keymap_file"
+                return 0
+            fi
+
+        fi
+
+    done
+
+    return 1
+}
+
+# ---------------------------------------------------------------------------
+# Convert an absolute keymap path back to a useful keymap identifier.
+# ---------------------------------------------------------------------------
+nhl_keyboard_layout_name() {
+
+    local resolved="$1"
+    local base
+
+    base="$(basename "$resolved")"
+
+    base="${base%.gz}"
+    base="${base%.map}"
+    base="${base%.bmap}"
+
+    printf '%s\n' "$base"
+}
 
 while true; do
 
@@ -384,20 +502,42 @@ while true; do
 
     keyboardLayout="${keyboardLayout,,}"
 
-    # loadkeys is the authoritative source for installed console keymaps.
-    # --parse validates and resolves the keymap without loading it.
-    if loadkeys --parse "$keyboardLayout" >/dev/null 2>&1; then
+    if [ -z "$keyboardLayout" ]; then
+        keyboardLayout="$keyboardDefault"
+    fi
 
-        echo "$OK Keyboard layout verified by loadkeys: $keyboardLayout"
+    resolved_keyboard_layout=""
+
+    if resolved_keyboard_layout="$(
+        nhl_resolve_keyboard_layout "$keyboardLayout"
+    )"; then
+
+        # If a path was returned, convert it to its keymap name.
+        if [[ "$resolved_keyboard_layout" == /* ]]; then
+            keyboardLayout="$(
+                nhl_keyboard_layout_name "$resolved_keyboard_layout"
+            )"
+        else
+            keyboardLayout="$resolved_keyboard_layout"
+        fi
+
+        echo "$OK Keyboard layout verified: $keyboardLayout"
         break
 
     fi
 
-    echo "${WARN} Keyboard layout '$keyboardLayout' could not be verified by loadkeys."
-    echo "${NOTE} Enter a keymap provided by the installed kbd package."
-    echo "${NOTE} Examples include: de-latin1, de, us, uk, fr, it, es, ru"
+    echo
+    echo "${WARN} Keyboard layout '$keyboardLayout' could not be verified."
+    echo "${NOTE} Try one of the installed console keymaps."
+    echo "${NOTE} For German keyboards, use: de-latin1"
+    echo "${NOTE} Other examples: us, uk, fr, it, es, ru"
+    echo
 
 done
+
+# ===========================================================================
+# SAVE KEYBOARD LAYOUT
+# ===========================================================================
 
 variables_file="$hostDir/variables.nix"
 
@@ -532,8 +672,6 @@ fi
 
 # ===========================================================================
 # LUKS / TPM
-#
-# Machines without LUKS mappings are valid and skip TPM enrollment.
 # ===========================================================================
 
 if type nhl_prompt_luks_tpm_setup >/dev/null 2>&1; then
@@ -654,13 +792,6 @@ echo "$OK Machine-local host configuration is complete."
 
 # ===========================================================================
 # FLAKE VALIDATION
-#
-# The validation distinguishes between:
-#
-#   - a missing nixosConfigurations attribute
-#   - a configuration that exists but fails evaluation
-#
-# Machine-local files are included through the path-based flake reference.
 # ===========================================================================
 
 echo "-----"
@@ -819,7 +950,7 @@ if ! nix eval \
     echo
 
     echo "${WARN} Target:"
-    echo "    $flake_ref#$flake_config"
+    echo "    $flake_ref#$hostName"
 
     echo
 
