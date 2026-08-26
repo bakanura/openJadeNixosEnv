@@ -464,9 +464,18 @@ fi
 
 if grep -qE '^[[:space:]]*keyboardLayout[[:space:]]*=' "$variables_file"; then
 
+if grep -qE '^[[:space:]]*keyboardLayout[[:space:]]*=' "$variables_file"; then
+
     sed -i \
-        's/^[[:space:]]*keyboardLayout[[:space:]]*=[[:space:]]*"[^"]*"/  keyboardLayout = "'"$keyboardLayout"'";/' \
+        -E "s|^[[:space:]]*keyboardLayout[[:space:]]*=.*$|  keyboardLayout = \"${keyboardLayout}\";|" \
         "$variables_file"
+
+else
+
+    printf '\n  keyboardLayout = "%s";\n' "$keyboardLayout" \
+        >> "$variables_file"
+
+fi
 
 else
 
