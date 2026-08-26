@@ -4,12 +4,12 @@
 #
 # Host path model:
 #   hosts/default/              = permanent template
-#   .local-hosts/<hostname>/    = generated/current host
+#   .local-host/<hostname>/    = generated/current host
 #
 # IMPORTANT:
 #   Hardware configuration is ALWAYS read from:
 #
-#     <repoRoot>/.local-hosts/<hostname>/hardware.nix
+#     <repoRoot>/.local-host/<hostname>/hardware.nix
 #
 #   hosts/default/hardware.nix is a TEMPLATE ONLY and is NEVER used
 #   as a fallback for host-specific hardware detection.
@@ -70,7 +70,7 @@ nhl_patch_flake_identity() {
   local repoRoot="$1"
   local hostName="$2"
   local installUsername="$3"
-  local identityFile="${repoRoot}/.local-hosts/${hostName}/identity.json"
+  local identityFile="${repoRoot}/.local-host/${hostName}/identity.json"
 
   if [ "$installUsername" = "nixos-bootstrap" ] && [ -f "$identityFile" ]; then
     local existing
@@ -383,7 +383,7 @@ nhl_preflight_fresh_install_target() {
 
   local repoRoot="$1"
   local hostName="$2"
-  local hostDir="${repoRoot}/.local-hosts/${hostName}"
+  local hostDir="${repoRoot}/.local-host/${hostName}"
 
   if [ ! -d "${repoRoot}/hosts/default" ]; then
     echo "[ERROR] Missing hosts/default template directory."
@@ -413,7 +413,7 @@ nhl_is_enrolled_device() {
 
   repoRoot=$(nhl_repo_root) || return 1
 
-  marker="${repoRoot}/.local-hosts/${hostName}/.nhl-enrolled"
+  marker="${repoRoot}/.local-host/${hostName}/.nhl-enrolled"
 
   if [ ! -f "$marker" ]; then
     return 1
@@ -449,7 +449,7 @@ nhl_mark_device_enrolled() {
     return 1
   }
 
-  hostDir="${repoRoot}/.local-hosts/${hostName}"
+  hostDir="${repoRoot}/.local-host/${hostName}"
   marker="${hostDir}/.nhl-enrolled"
 
   if [ -r /etc/machine-id ]; then
@@ -477,7 +477,7 @@ nhl_state_file() {
 
   repoRoot=$(nhl_repo_root) || return 1
 
-  printf "%s\n" "${repoRoot}/.local-hosts/${hostName}/.installer-state.json"
+  printf "%s\n" "${repoRoot}/.local-host/${hostName}/.installer-state.json"
 }
 
 nhl_load_installer_state() {
@@ -609,9 +609,9 @@ nhl_save_installer_state() {
 
   repoRoot=$(nhl_repo_root) || return 1
 
-  stateFile="${repoRoot}/.local-hosts/${hostName}/.installer-state.json"
+  stateFile="${repoRoot}/.local-host/${hostName}/.installer-state.json"
 
-  mkdir -p "${repoRoot}/.local-hosts/${hostName}"
+  mkdir -p "${repoRoot}/.local-host/${hostName}"
 
   if [ "$fingerprintEnabled" = "1" ] ||
      [ "$fingerprintEnabled" = "true" ]; then
@@ -1515,7 +1515,7 @@ nhl_host_config_path() {
     return 1
   }
 
-  cfg="${repoRoot}/.local-hosts/${hostName}/config.nix"
+  cfg="${repoRoot}/.local-host/${hostName}/config.nix"
 
   if [ ! -f "$cfg" ]; then
     cfg="${repoRoot}/hosts/default/config.nix"
@@ -1539,7 +1539,7 @@ nhl_host_variables_path() {
     return 1
   }
 
-  vars="${repoRoot}/.local-hosts/${hostName}/variables.nix"
+  vars="${repoRoot}/.local-host/${hostName}/variables.nix"
 
   if [ ! -f "$vars" ]; then
     vars="${repoRoot}/hosts/default/variables.nix"
@@ -1553,7 +1553,7 @@ nhl_host_hardware_path() {
   #
   # HARDWARE IS DIFFERENT:
   #
-  #   <repoRoot>/.local-hosts/<hostName>/hardware.nix
+  #   <repoRoot>/.local-host/<hostName>/hardware.nix
   #
   # is the ONLY accepted hardware configuration.
   #
@@ -1572,7 +1572,7 @@ nhl_host_hardware_path() {
     return 1
   }
 
-  hostDir="${repoRoot}/.local-hosts/${hostName}"
+  hostDir="${repoRoot}/.local-host/${hostName}"
   hw="${hostDir}/hardware.nix"
 
   if [ ! -d "$hostDir" ]; then
@@ -1763,7 +1763,7 @@ nhl_prompt_luks_tpm_setup() {
   # There is deliberately NO fallback to hosts/default/hardware.nix.
   resolvedHardware=$(nhl_host_hardware_path "$hostName") || {
     echo "${ERROR} Hardware config not found for host '${hostName}'."
-    echo "${ERROR} Checked generated host: $(nhl_repo_root)/.local-hosts/${hostName}/hardware.nix"
+    echo "${ERROR} Checked generated host: $(nhl_repo_root)/.local-host/${hostName}/hardware.nix"
     echo "${ERROR} Refusing to use hosts/default/hardware.nix."
     return 1
   }
@@ -1944,7 +1944,7 @@ nhl_run_luks_tpm_enrollment() {
     return 1
   }
 
-  local recoveryDir="${repoRoot}/.local-hosts/${hostName}"
+  local recoveryDir="${repoRoot}/.local-host/${hostName}"
 
   mkdir -p "$recoveryDir"
 
@@ -1995,7 +1995,7 @@ nhl_print_recovery_key_and_confirm() {
   printf "%s\n" "${recoveryKey}"
   printf "%s\n" "SHA-256: ${sha256}"
   printf "%s\n" "SHA-512: ${sha512}"
-  printf "%s\n" "Hash copies saved under .local-hosts/<hostname>/.luks-recovery-key.sha{256,512}"
+  printf "%s\n" "Hash copies saved under .local-host/<hostname>/.luks-recovery-key.sha{256,512}"
   printf "%s\n" "-----"
 
   if ! nhl_yes_no "Are u sure you saved this recovery key? (y/N): "; then
