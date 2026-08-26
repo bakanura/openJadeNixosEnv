@@ -355,207 +355,29 @@ echo "-----"
 
 keyboardDefault="${NHL_STATE_KEYBOARD_LAYOUT:-de}"
 
-if ! command -v loadkeys >/dev/null 2>&1; then
-    echo "${ERROR} loadkeys is required to validate keyboard layouts."
-    exit 1
-fi
+if type nhl_read_input >/dev/null 2>&1; then
 
-# ---------------------------------------------------------------------------
-# Resolve a console keymap from the keymaps actually installed on the
-# current NixOS system.
-#
-# Resolution order:
-#
-#   1. Exact installed keymap name.
-#   2. Exact keymap file.
-#   3. A keymap whose name begins with "<requested>-".
-#
-# This allows, for example:
-#
-#   de        -> de-latin1
-#
-# when de-latin1 is the installed German keymap.
-#
-# The function returns the canonical keymap name suitable for:
-#
-#   loadkeys
-#   console.keyMap
-#   installer state
-# ---------------------------------------------------------------------------
-nhl_resolve_keymap() {
-
-    local requested="${1,,}"
-    local keymap_root
-    local candidate
-    local relative
-    local filename
-    local base
-    local exact_match=""
-    local prefix_match=""
-    local prefix_base=""
-
-    [ -n "$requested" ] || return 1
-
-    # Direct loadkeys resolution is preferred.
-    # This handles keymaps that kbd can resolve through its own search path.
-    if loadkeys --parse "$requested" >/dev/null 2>&1; then
-        printf '%s\n' "$requested"
-        return 0
-    fi
-
-    while IFS= read -r keymap_root; do
-
-        [ -d "$keymap_root" ] || continue
-
-        while IFS= read -r -d '' candidate; do
-
-            filename="$(basename "$candidate")"
-
-            base="$filename"
-
-            case "$base" in
-                *.map.gz)
-                    base="${base%.map.gz}"
-                    ;;
-                *.map)
-                    base="${base%.map}"
-                    ;;
-                *.bmap.gz)
-                    base="${base%.bmap.gz}"
-                    ;;
-                *.bmap)
-                    base="${base%.bmap}"
-                    ;;
-            esac
-
-            base="${base,,}"
-
-            # Exact match wins.
-            if [ "$base" = "$requested" ]; then
-                exact_match="$candidate"
-                break
-            fi
-
-            # Otherwise remember the first requested-* match.
-            prefix_base="${requested}-"
-
-            if [[ "$base" == "$prefix_base"* ]] \
-                && [ -z "$prefix_match" ]; then
-
-                prefix_match="$candidate"
-
-            fi
-
-        done < <(
-            find "$keymap_root" \
-                -type f \
-                \( \
-                    -name '*.map' \
-                    -o -name '*.map.gz' \
-                    -o -name '*.bmap' \
-                    -o -name '*.bmap.gz' \
-                \) \
-                -print0 \
-                2>/dev/null \
-                | sort -z
-        )
-
-        if [ -n "$exact_match" ]; then
-            break
-        fi
-
-    done < <(
-        printf '%s\n' \
-            "/run/current-system/sw/share/keymaps" \
-            "/usr/share/keymaps" \
-            "/usr/share/kbd/keymaps"
+    keyboardLayout=$(
+        nhl_read_input \
+            "$CAT Enter your keyboard layout: [ ${keyboardDefault} ] " \
+            "$keyboardDefault"
     )
 
-    # Use an exact file match if one exists.
-    if [ -n "$exact_match" ]; then
+else
 
-        candidate="$exact_match"
+    read -rp \
+        "$CAT Enter your keyboard layout: [ ${keyboardDefault} ] " \
+        keyboardLayout </dev/tty
 
-    elif [ -n "$prefix_match" ]; then
-
-        candidate="$prefix_match"
-
-    else
-
-        return 1
-
+    if [ -z "$keyboardLayout" ]; then
+        keyboardLayout="$keyboardDefault"
     fi
 
-    filename="$(basename "$candidate")"
-    base="$filename"
+fi
 
-    case "$base" in
-        *.map.gz)
-            base="${base%.map.gz}"
-            ;;
-        *.map)
-            base="${base%.map}"
-            ;;
-        *.bmap.gz)
-            base="${base%.bmap.gz}"
-            ;;
-        *.bmap)
-            base="${base%.bmap}"
-            ;;
-    esac
+keyboardLayout="${keyboardLayout,,}"
 
-    # Final validation against the actual keymap file.
-    if loadkeys --parse "$candidate" >/dev/null 2>&1; then
-
-        printf '%s\n' "$base"
-        return 0
-
-    fi
-
-    return 1
-}
-
-while true; do
-
-    if type nhl_read_input >/dev/null 2>&1; then
-
-        keyboardLayout=$(
-            nhl_read_input \
-                "$CAT Enter your keyboard layout: [ ${keyboardDefault} ] " \
-                "$keyboardDefault"
-        )
-
-    else
-
-        read -rp \
-            "$CAT Enter your keyboard layout: [ ${keyboardDefault} ] " \
-            keyboardLayout </dev/tty
-
-        if [ -z "$keyboardLayout" ]; then
-            keyboardLayout="$keyboardDefault"
-        fi
-
-    fi
-
-    keyboardLayout="${keyboardLayout,,}"
-
-    # Resolve the requested layout to the actual installed console keymap.
-    resolved_keymap="$(
-        nhl_resolve_keymap "$keyboardLayout" 2>/dev/null || true
-    )"
-
-    if [ -n "$resolved_keymap" ]; then
-
-        keyboardLayout="$resolved_keymap"
-
-        echo "$OK Keyboard layout verified: $keyboardLayout"
-        break
-
-    fi
-
-    echo "${WARN} Keyboard layout '$keyboardLayout' could not be resolved."
-
-done
+echo "$OK Keyboard layout selected: $keyboardLayout"
 
 # ===========================================================================
 # WRITE KEYBOARD LAYOUT
