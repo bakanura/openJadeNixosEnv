@@ -355,25 +355,57 @@ echo "-----"
 
 keyboardDefault="${NHL_STATE_KEYBOARD_LAYOUT:-de}"
 
-if type nhl_read_input >/dev/null 2>&1; then
+if ! command -v loadkeys >/dev/null 2>&1; then
+    echo "${ERROR} loadkeys is required to validate keyboard layouts."
+    exit 1
+fi
 
-    keyboardLayout=$(
-        nhl_read_input \
+while true; do
+
+    if type nhl_read_input >/dev/null 2>&1; then
+
+        keyboardLayout=$(
+            nhl_read_input \
+                "$CAT Enter your keyboard layout: [ ${keyboardDefault} ] " \
+                "$keyboardDefault"
+        )
+
+    else
+
+        read -rp \
             "$CAT Enter your keyboard layout: [ ${keyboardDefault} ] " \
-            "$keyboardDefault"
-    )
+            keyboardLayout </dev/tty
 
-else
+        if [ -z "$keyboardLayout" ]; then
+            keyboardLayout="$keyboardDefault"
+        fi
 
-    read -rp \
-        "$CAT Enter your keyboard layout: [ ${keyboardDefault} ] " \
-        keyboardLayout </dev/tty
-
-    if [ -z "$keyboardLayout" ]; then
-        keyboardLayout="$keyboardDefault"
     fi
 
-fi
+    # Keyboard layouts are XKB/console layout identifiers.
+    # Restrict input to the conventional lowercase layout identifier form.
+    if [[ ! "$keyboardLayout" =~ ^[a-z0-9_+-]+$ ]]; then
+
+        echo "${WARN} Invalid keyboard layout identifier: '$keyboardLayout'"
+        echo "${NOTE} Enter a valid layout such as: de, us, gb, fr, it, es"
+        continue
+
+    fi
+
+    # loadkeys --parse resolves and parses the keymap without loading it.
+    # This verifies that the supplied layout is actually available.
+    if ! loadkeys --parse "$keyboardLayout" >/dev/null 2>&1; then
+
+        echo "${WARN} Keyboard layout '$keyboardLayout' could not be verified by loadkeys."
+        echo "${NOTE} Enter an installed layout such as: de, us, gb, fr, it, es"
+        continue
+
+    fi
+
+    echo "$OK Keyboard layout verified by loadkeys: $keyboardLayout"
+    break
+
+done
 
 variables_file="$hostDir/variables.nix"
 
@@ -400,6 +432,7 @@ else
 fi
 
 echo "$OK Keyboard layout configured: $keyboardLayout"
+
 
 # ===========================================================================
 # TIMEZONE / CONSOLE KEYMAP
