@@ -4,41 +4,81 @@
 #
 # Host path model:
 #   hosts/default/              = permanent template
-#   .local-hosts/<hostname>/   = generated/current host
+#   .local-hosts/<hostname>/    = generated/current host
+#
+# IMPORTANT:
+#   Hardware configuration is ALWAYS read from:
+#
+#     <repoRoot>/.local-hosts/<hostname>/hardware.nix
+#
+#   hosts/default/hardware.nix is a TEMPLATE ONLY and is NEVER used
+#   as a fallback for host-specific hardware detection.
 
 nhl_repo_root() {
-  if [ -n "${NHL_REPO_ROOT:-}" ] && [ -d "${NHL_REPO_ROOT}" ]; then
-    printf "%s\n" "${NHL_REPO_ROOT}"
-    return 0
+  local root=""
+
+  # NHL_REPO_ROOT may be supplied by callers. Always canonicalize it so
+  # relative values such as "." cannot leak into host-path resolution.
+  if [ -n "${NHL_REPO_ROOT:-}" ]; then
+    if [ -d "${NHL_REPO_ROOT}" ]; then
+      root="$(cd "${NHL_REPO_ROOT}" 2>/dev/null && pwd -P)" || root=""
+    fi
+
+    if [ -n "$root" ]; then
+      printf "%s\n" "$root"
+      return 0
+    fi
   fi
 
-  if git rev-parse --show-toplevel >/dev/null 2>&1; then
-    git rev-parse --show-toplevel
-    return 0
+  # Prefer the actual git repository root.
+  if root="$(git rev-parse --show-toplevel 2>/dev/null)"; then
+    if [ -d "$root" ]; then
+      root="$(cd "$root" 2>/dev/null && pwd -P)" || root=""
+
+      if [ -n "$root" ]; then
+        printf "%s\n" "$root"
+        return 0
+      fi
+    fi
   fi
 
+  # When sourced from scripts/lib/install-common.sh, resolve relative to
+  # this file rather than the caller's current working directory.
   if [ -n "${BASH_SOURCE[0]:-}" ]; then
     local helper_dir=""
-    helper_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-    printf "%s\n" "$(cd "${helper_dir}/../.." && pwd)"
-    return 0
+
+    helper_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd -P)" || true
+
+    if [ -n "$helper_dir" ] && [ -d "$helper_dir/../.." ]; then
+      root="$(cd "$helper_dir/../.." 2>/dev/null && pwd -P)" || root=""
+
+      if [ -n "$root" ]; then
+        printf "%s\n" "$root"
+        return 0
+      fi
+    fi
   fi
 
-  pwd
+  root="$(pwd -P 2>/dev/null)" || return 1
+  printf "%s\n" "$root"
 }
 
 nhl_patch_flake_identity() {
   # Backward-compatible helper name. It now writes host identity JSON.
   # Args: $1 = repo root, $2 = hostName, $3 = username
+
   local repoRoot="$1"
   local hostName="$2"
   local installUsername="$3"
   local identityFile="${repoRoot}/.local-hosts/${hostName}/identity.json"
 
-  # Safety check: do not overwrite a real user with the bootstrap fallback if the file already exists.
   if [ "$installUsername" = "nixos-bootstrap" ] && [ -f "$identityFile" ]; then
     local existing
-    existing=$(grep -oP '"username":\s*"\K[^"]+' "$identityFile" || echo "")
+
+    existing=$(
+      grep -oP '"username":\s*"\K[^"]+' "$identityFile" 2>/dev/null || echo ""
+    )
+
     if [ -n "$existing" ] && [ "$existing" != "nixos-bootstrap" ]; then
       echo "[WARN] Refusing to overwrite existing user '$existing' with 'nixos-bootstrap' in identity file."
       return 0
@@ -56,6 +96,7 @@ EOF
 
 nhl_print_postinstall_notes() {
   # Args: $1 = repo root, $2 = hostName
+
   local repoRoot="$1"
   local hostName="$2"
 
@@ -80,6 +121,7 @@ nhl_is_noninteractive() {
 
 nhl_read_input() {
   # Args: $1 = prompt, $2 = default value
+
   local prompt="$1"
   local defaultValue="${2:-}"
   local ans=""
@@ -99,7 +141,9 @@ nhl_read_input() {
 }
 
 nhl_yes_no() {
-  # Args: $1 = prompt, returns success for yes.
+  # Args: $1 = prompt
+  # Returns success for yes.
+
   local prompt="$1"
   local ans=""
 
@@ -117,7 +161,6 @@ nhl_yes_no() {
 }
 
 nhl_resolve_install_username() {
-  # 1. Check SUDO_USER (most reliable when running via sudo)
   if [ -n "${SUDO_USER:-}" ] && [ "$SUDO_USER" != "root" ]; then
     if id "$SUDO_USER" >/dev/null 2>&1; then
       printf "%s\n" "$SUDO_USER"
@@ -125,7 +168,6 @@ nhl_resolve_install_username() {
     fi
   fi
 
-  # 2. Check current USER
   if [ -n "${USER:-}" ] && [ "$USER" != "root" ]; then
     if id "$USER" >/dev/null 2>&1; then
       printf "%s\n" "$USER"
@@ -133,7 +175,6 @@ nhl_resolve_install_username() {
     fi
   fi
 
-  # 3. Last ditch check of current effective ID
   local current_id_name
   current_id_name=$(id -un 2>/dev/null || true)
 
@@ -142,13 +183,11 @@ nhl_resolve_install_username() {
     return 0
   fi
 
-  # 4. Fallback for non-interactive automation
   if nhl_is_noninteractive; then
     printf "nixos-bootstrap\n"
     return 0
   fi
 
-  # 5. Interactive fallback: Use the first UID 1000 user found (skipping root)
   local real_user
   real_user=$(awk -F: '$3 == 1000 {print $1}' /etc/passwd | head -n1)
 
@@ -178,12 +217,16 @@ nhl_sanitize_hostname() {
   local raw="$1"
   local sanitized=""
 
-  sanitized=$(printf "%s" "$raw" |
-    tr '[:space:]' '-' |
-    tr -cd '[:alnum:]-')
+  sanitized=$(
+    printf "%s" "$raw" |
+      tr '[:space:]' '-' |
+      tr -cd '[:alnum:]-'
+  )
 
-  sanitized=$(printf "%s" "$sanitized" |
-    sed 's/--*/-/g; s/^-//; s/-$//')
+  sanitized=$(
+    printf "%s" "$sanitized" |
+      sed 's/--*/-/g; s/^-//; s/-$//'
+  )
 
   sanitized="${sanitized:0:63}"
 
@@ -196,6 +239,7 @@ nhl_sanitize_hostname() {
 
 nhl_derive_hostname() {
   # Args: $1 = optional prefix (default: NixOS)
+
   local prefix="${1:-NixOS}"
   local serial=""
   local serial_clean=""
@@ -203,7 +247,6 @@ nhl_derive_hostname() {
 
   serial=$(nhl_detect_host_serial)
 
-  # Keep alphanumeric only for hostname safety.
   serial_clean=$(echo "$serial" | tr -cd '[:alnum:]')
 
   if [ -z "$serial_clean" ]; then
@@ -211,8 +254,6 @@ nhl_derive_hostname() {
   fi
 
   hostName="${prefix}-${serial_clean}"
-
-  # Linux hostname max is 63 chars.
   hostName=$(nhl_sanitize_hostname "$hostName")
 
   printf "%s\n" "$hostName"
@@ -235,9 +276,11 @@ nhl_prompt_hostname() {
 
   if nhl_is_noninteractive; then
     export NHL_SELECTED_HOSTNAME_MODE="prefix-serial"
+
     export NHL_SELECTED_HOSTNAME_PREFIX="$(
       nhl_sanitize_hostname "${NHL_STATE_HOSTNAME_PREFIX:-$default_prefix}"
     )"
+
     export NHL_SELECTED_HOSTNAME_VALUE="$(
       nhl_derive_hostname "${NHL_SELECTED_HOSTNAME_PREFIX}"
     )"
@@ -299,6 +342,7 @@ nhl_prompt_hostname() {
 
   export NHL_SELECTED_HOSTNAME_MODE="prefix-serial"
   export NHL_SELECTED_HOSTNAME_PREFIX="$prefix"
+
   export NHL_SELECTED_HOSTNAME_VALUE="$(
     nhl_derive_hostname "${NHL_SELECTED_HOSTNAME_PREFIX}"
   )"
@@ -307,7 +351,7 @@ nhl_prompt_hostname() {
 }
 
 nhl_preflight_install_repo() {
-  local repoRoot="${1:-$(pwd)}"
+  local repoRoot="${1:-$(nhl_repo_root)}"
   local missing=0
 
   for path in \
@@ -322,7 +366,7 @@ nhl_preflight_install_repo() {
     scripts/lib/install-common.sh; do
 
     if [ ! -e "${repoRoot}/${path}" ]; then
-      echo "[ERROR] Missing required installer path: ${path}"
+      echo "[ERROR] Missing required installer path: ${repoRoot}/${path}"
       missing=1
     fi
   done
@@ -336,6 +380,7 @@ nhl_preflight_install_repo() {
 
 nhl_preflight_fresh_install_target() {
   # Args: $1 = repo root, $2 = hostName
+
   local repoRoot="$1"
   local hostName="$2"
   local hostDir="${repoRoot}/.local-hosts/${hostName}"
@@ -360,9 +405,15 @@ nhl_preflight_fresh_install_target() {
 
 nhl_is_enrolled_device() {
   # Args: $1 = hostName
+
   local hostName="$1"
-  local marker="./.local-hosts/$hostName/.nhl-enrolled"
+  local repoRoot=""
+  local marker=""
   local mid=""
+
+  repoRoot=$(nhl_repo_root) || return 1
+
+  marker="${repoRoot}/.local-hosts/${hostName}/.nhl-enrolled"
 
   if [ ! -f "$marker" ]; then
     return 1
@@ -385,11 +436,21 @@ nhl_is_enrolled_device() {
 
 nhl_mark_device_enrolled() {
   # Args: $1 = hostName
+
   local hostName="$1"
-  local hostDir="./.local-hosts/$hostName"
-  local marker="${hostDir}/.nhl-enrolled"
+  local repoRoot=""
+  local hostDir=""
+  local marker=""
   local mid=""
   local serial=""
+
+  repoRoot=$(nhl_repo_root) || {
+    echo "[ERROR] Could not determine repository root."
+    return 1
+  }
+
+  hostDir="${repoRoot}/.local-hosts/${hostName}"
+  marker="${hostDir}/.nhl-enrolled"
 
   if [ -r /etc/machine-id ]; then
     mid=$(cat /etc/machine-id 2>/dev/null || true)
@@ -410,17 +471,22 @@ EOF
 
 nhl_state_file() {
   # Args: $1 = hostName
-  local hostName="$1"
 
-  printf "./.local-hosts/%s/.installer-state.json\n" "$hostName"
+  local hostName="$1"
+  local repoRoot=""
+
+  repoRoot=$(nhl_repo_root) || return 1
+
+  printf "%s\n" "${repoRoot}/.local-hosts/${hostName}/.installer-state.json"
 }
 
 nhl_load_installer_state() {
   # Args: $1 = hostName
+
   local hostName="$1"
   local stateFile
 
-  stateFile=$(nhl_state_file "$hostName")
+  stateFile=$(nhl_state_file "$hostName") || return 1
 
   unset \
     NHL_STATE_GPU_PROFILE \
@@ -537,12 +603,15 @@ nhl_save_installer_state() {
   local hostnameMode="${8:-prefix-serial}"
   local hostnamePrefix="${9:-NixOS}"
   local hostnameValue="${10:-$hostName}"
-  local stateFile
+  local repoRoot=""
+  local stateFile=""
   local fpJson="false"
 
-  stateFile=$(nhl_state_file "$hostName")
+  repoRoot=$(nhl_repo_root) || return 1
 
-  mkdir -p "./.local-hosts/$hostName"
+  stateFile="${repoRoot}/.local-hosts/${hostName}/.installer-state.json"
+
+  mkdir -p "${repoRoot}/.local-hosts/${hostName}"
 
   if [ "$fingerprintEnabled" = "1" ] ||
      [ "$fingerprintEnabled" = "true" ]; then
@@ -568,17 +637,18 @@ EOF
 
 nhl_detect_gpu_and_toggle() {
   # Args: $1 = hostName
+
   local hostName="$1"
   local cfg=""
 
-  cfg=$(nhl_host_config_path "$hostName")
+  cfg=$(nhl_host_config_path "$hostName") || return 1
 
   local has_vm=false
   local has_nvidia=false
   local has_amd=false
   local has_intel=false
 
-  if hostnamectl | grep -q 'Chassis: vm'; then
+  if hostnamectl 2>/dev/null | grep -q 'Chassis: vm'; then
     has_vm=true
   fi
 
@@ -742,7 +812,8 @@ nhl_sed_file() {
 }
 
 nhl_insert_option_before_closing_brace() {
-  # Args: $1 = file, $2 = full option line (including trailing ;)
+  # Args: $1 = file, $2 = full option line
+
   local file="$1"
   local line="$2"
   local last_brace_line
@@ -819,6 +890,7 @@ nhl_insert_option_before_closing_brace() {
 
 nhl_lookup_timezone_from_city() {
   # Args: $1 = city
+
   local city="$1"
   local encoded=""
   local resp=""
@@ -882,11 +954,12 @@ nhl_detect_timezone_auto() {
 
 nhl_prompt_timezone_console() {
   # Args: $1 = hostName, $2 = defaultKeyboardLayout
+
   local hostName="$1"
   local defKb="${2:-us}"
   local cfg=""
 
-  cfg=$(nhl_host_config_path "$hostName")
+  cfg=$(nhl_host_config_path "$hostName") || return 1
 
   local timeZone=""
   local city=""
@@ -1241,10 +1314,11 @@ EOF
 
 nhl_prompt_fingerprint() {
   # Args: $1 = hostName
+
   local hostName="$1"
   local cfg=""
 
-  cfg=$(nhl_host_config_path "$hostName")
+  cfg=$(nhl_host_config_path "$hostName") || return 1
 
   local enable_fp
   local default_prompt="(y/N)"
@@ -1292,10 +1366,11 @@ nhl_prompt_fingerprint() {
 
 nhl_prompt_vscode_confirm_sync() {
   # Args: $1 = hostName
+
   local hostName="$1"
   local vars=""
 
-  vars=$(nhl_host_variables_path "$hostName")
+  vars=$(nhl_host_variables_path "$hostName") || return 1
 
   local default_prompt="(y/N)"
   local default_value="n"
@@ -1344,6 +1419,7 @@ nhl_prompt_vscode_confirm_sync() {
 
 nhl_enroll_fingerprint() {
   # Args: $1 = username
+
   local userName="$1"
 
   if [ "${NHL_ENABLE_FINGERPRINT:-0}" != "1" ]; then
@@ -1426,11 +1502,23 @@ nhl_prompt_firmware_updates() {
 
 nhl_host_config_path() {
   # Args: $1 = hostName
+  #
+  # Host-specific config is preferred.
+  # hosts/default/config.nix remains a template fallback for config only.
+
   local hostName="$1"
-  local cfg="./.local-hosts/$hostName/config.nix"
+  local repoRoot=""
+  local cfg=""
+
+  repoRoot=$(nhl_repo_root) || {
+    echo "[ERROR] Could not determine repository root." >&2
+    return 1
+  }
+
+  cfg="${repoRoot}/.local-hosts/${hostName}/config.nix"
 
   if [ ! -f "$cfg" ]; then
-    cfg="./hosts/default/config.nix"
+    cfg="${repoRoot}/hosts/default/config.nix"
   fi
 
   printf "%s\n" "$cfg"
@@ -1438,11 +1526,23 @@ nhl_host_config_path() {
 
 nhl_host_variables_path() {
   # Args: $1 = hostName
+  #
+  # Host-specific variables are preferred.
+  # hosts/default/variables.nix remains a template fallback for variables only.
+
   local hostName="$1"
-  local vars="./.local-hosts/$hostName/variables.nix"
+  local repoRoot=""
+  local vars=""
+
+  repoRoot=$(nhl_repo_root) || {
+    echo "[ERROR] Could not determine repository root." >&2
+    return 1
+  }
+
+  vars="${repoRoot}/.local-hosts/${hostName}/variables.nix"
 
   if [ ! -f "$vars" ]; then
-    vars="./hosts/default/variables.nix"
+    vars="${repoRoot}/hosts/default/variables.nix"
   fi
 
   printf "%s\n" "$vars"
@@ -1451,41 +1551,82 @@ nhl_host_variables_path() {
 nhl_host_hardware_path() {
   # Args: $1 = hostName
   #
-  # Generated/installed hosts live under .local-hosts/.
-  # hosts/default is ONLY the template and must never be used as a
-  # fallback for host-specific hardware detection.
+  # HARDWARE IS DIFFERENT:
+  #
+  #   <repoRoot>/.local-hosts/<hostName>/hardware.nix
+  #
+  # is the ONLY accepted hardware configuration.
+  #
+  # hosts/default/hardware.nix is NEVER used as a fallback.
+  #
+  # This function intentionally returns a hard error if the generated
+  # host hardware file does not exist.
+
   local hostName="$1"
-  local hw="./.local-hosts/$hostName/hardware.nix"
+  local repoRoot=""
+  local hostDir=""
+  local hw=""
+
+  repoRoot=$(nhl_repo_root) || {
+    echo "[ERROR] Could not determine repository root." >&2
+    return 1
+  }
+
+  hostDir="${repoRoot}/.local-hosts/${hostName}"
+  hw="${hostDir}/hardware.nix"
+
+  if [ ! -d "$hostDir" ]; then
+    echo "[ERROR] Generated host directory does not exist: $hostDir" >&2
+    echo "[ERROR] Expected host hardware configuration: $hw" >&2
+    echo "[ERROR] Refusing to use hosts/default/hardware.nix as a fallback." >&2
+    return 1
+  fi
 
   if [ ! -f "$hw" ]; then
-    echo "[ERROR] Host hardware configuration not found: $hw" >&2
-    echo "[ERROR] Refusing to fall back to hosts/default/hardware.nix." >&2
+    echo "[ERROR] Generated host hardware configuration not found: $hw" >&2
+    echo "[ERROR] Refusing to use hosts/default/hardware.nix as a fallback." >&2
+    echo "[ERROR] Contents of generated host directory:" >&2
+
+    if find "$hostDir" -maxdepth 1 -type f -printf '  %f\n' 2>/dev/null |
+       sort >&2; then
+      :
+    else
+      echo "  [unable to list directory]" >&2
+    fi
+
+    return 1
+  fi
+
+  # Extra sanity check. This catches cases where a path exists but is not
+  # actually readable by the installer process.
+  if [ ! -r "$hw" ]; then
+    echo "[ERROR] Generated host hardware configuration exists but is not readable: $hw" >&2
     return 1
   fi
 
   printf "%s\n" "$hw"
 }
 
-
 nhl_extract_luks_name_from_hardware() {
   # Args: $1 = hostName
+
   local hostName="$1"
   local hw=""
   local name=""
 
-  hw=$(nhl_host_hardware_path "$hostName")
+  hw=$(nhl_host_hardware_path "$hostName") || return 1
 
-  if [ ! -f "$hw" ]; then
-    echo "[ERROR] Hardware config not found for host '${hostName}'." >&2
-    echo "[ERROR] Checked generated host: ./.local-hosts/${hostName}/hardware.nix" >&2
-    echo "[ERROR] Checked template: ./hosts/default/hardware.nix" >&2
-    return 1
-  fi
-
+  # NixOS generated hardware files normally contain:
+  #
+  # boot.initrd.luks.devices."luks-...".device = "...";
+  #
+  # Keep the parser tolerant of whitespace around the expression.
   name=$(
     sed -n \
-      's/^[[:space:]]*boot\.initrd\.luks\.devices\."\([^"]*\)"\.device[[:space:]]*=[[:space:]]*".*";/\1/p' \
+      's/^[[:space:]]*boot\.initrd\.luks\.devices\."[^"]*"[[:space:]]*\.device[[:space:]]*=[[:space:]]*".*";/\0/p' \
       "$hw" |
+      sed -n \
+        's/^[[:space:]]*boot\.initrd\.luks\.devices\."\([^"]*\)".*$/\1/p' |
       head -n1
   )
 
@@ -1494,27 +1635,22 @@ nhl_extract_luks_name_from_hardware() {
     return 0
   fi
 
+  echo "[ERROR] No LUKS device mapping found in: $hw" >&2
   return 1
 }
 
 nhl_extract_luks_device_from_hardware() {
   # Args: $1 = hostName
+
   local hostName="$1"
   local hw=""
   local dev=""
 
-  hw=$(nhl_host_hardware_path "$hostName")
-
-  if [ ! -f "$hw" ]; then
-    echo "[ERROR] Hardware config not found for host '${hostName}'." >&2
-    echo "[ERROR] Checked generated host: ./.local-hosts/${hostName}/hardware.nix" >&2
-    echo "[ERROR] Checked template: ./hosts/default/hardware.nix" >&2
-    return 1
-  fi
+  hw=$(nhl_host_hardware_path "$hostName") || return 1
 
   dev=$(
     sed -n \
-      's/^[[:space:]]*boot\.initrd\.luks\.devices\..*\.device[[:space:]]*=[[:space:]]*"\([^"]*\)";/\1/p' \
+      's/^[[:space:]]*boot\.initrd\.luks\.devices\."[^"]*"[[:space:]]*\.device[[:space:]]*=[[:space:]]*"\([^"]*\)";[[:space:]]*$/\1/p' \
       "$hw" |
       head -n1
   )
@@ -1524,17 +1660,36 @@ nhl_extract_luks_device_from_hardware() {
     return 0
   fi
 
+  # Also support generated files where the device name is not quoted
+  # exactly as expected by the primary expression, while still requiring
+  # the actual host hardware file.
+  dev=$(
+    grep -E \
+      'boot\.initrd\.luks\.devices\..*\.device[[:space:]]*=' \
+      "$hw" 2>/dev/null |
+      sed -n \
+        's/.*=[[:space:]]*"\([^"]*\)".*/\1/p' |
+      head -n1
+  )
+
+  if [ -n "$dev" ]; then
+    printf "%s\n" "$dev"
+    return 0
+  fi
+
+  echo "[ERROR] No LUKS device mapping found in: $hw" >&2
   return 1
 }
 
 nhl_patch_host_for_tpm_unlock() {
   # Args: $1 = hostName, $2 = luksName
+
   local hostName="$1"
   local luksName="$2"
   local cfg=""
   local crypttabLine=""
 
-  cfg=$(nhl_host_config_path "$hostName")
+  cfg=$(nhl_host_config_path "$hostName") || return 1
 
   [ -f "$cfg" ] || return 1
   [ -n "$luksName" ] || return 1
@@ -1571,7 +1726,7 @@ nhl_patch_host_for_tpm_unlock() {
 
   nhl_insert_option_before_closing_brace \
     "$cfg" \
-    "$crypttabLine"
+    "$crypttabLine" || return 1
 
   export NHL_ENABLE_TPM_LUKS_ENROLL=1
   export NHL_LUKS_NAME="$luksName"
@@ -1579,10 +1734,12 @@ nhl_patch_host_for_tpm_unlock() {
 
 nhl_prompt_luks_tpm_setup() {
   # Args: $1 = hostName
+
   local hostName="$1"
   local luksDevice=""
   local luksName=""
   local luksPassphrase=""
+  local resolvedHardware=""
 
   export NHL_ENABLE_TPM_LUKS_ENROLL=0
 
@@ -1600,28 +1757,24 @@ nhl_prompt_luks_tpm_setup() {
     return 0
   fi
 
-  # IMPORTANT:
-  # These helpers now resolve:
+  # HARD REQUIREMENT:
+  # The generated host hardware file must exist.
   #
-  #   .local-hosts/<hostName>/hardware.nix
-  #
-  # first, and only fall back to:
-  #
-  #   hosts/default/hardware.nix
-  #
-  # This is critical because .local-hosts contains the generated host
-  # hardware after the initial template clone.
-  luksDevice=$(nhl_extract_luks_device_from_hardware "$hostName" || true)
-  luksName=$(nhl_extract_luks_name_from_hardware "$hostName" || true)
+  # There is deliberately NO fallback to hosts/default/hardware.nix.
+  resolvedHardware=$(nhl_host_hardware_path "$hostName") || {
+    echo "${ERROR} Hardware config not found for host '${hostName}'."
+    echo "${ERROR} Checked generated host: $(nhl_repo_root)/.local-hosts/${hostName}/hardware.nix"
+    echo "${ERROR} Refusing to use hosts/default/hardware.nix."
+    return 1
+  }
+
+  luksDevice=$(nhl_extract_luks_device_from_hardware "$hostName") || true
+  luksName=$(nhl_extract_luks_name_from_hardware "$hostName") || true
 
   if [ -z "$luksDevice" ] || [ -z "$luksName" ]; then
-    local resolvedHardware=""
-    resolvedHardware=$(nhl_host_hardware_path "$hostName")
-
     echo "${WARN} No LUKS root mapping was found in host hardware config."
     echo "${WARN} Hardware file checked: ${resolvedHardware}"
-    echo "${NOTE} Expected generated host hardware at: ./.local-hosts/${hostName}/hardware.nix"
-    echo "${NOTE} Template fallback is: ./hosts/default/hardware.nix"
+    echo "${NOTE} No template fallback will be attempted."
     echo "${NOTE} Skipping TPM unlock enrollment. Disk encryption must be provisioned at install/partitioning time."
     return 0
   fi
@@ -1693,6 +1846,7 @@ nhl_generate_recovery_key() {
 
 nhl_run_luks_tpm_enrollment() {
   # Args: $1 = hostName
+
   local hostName="$1"
   local luksDevice="${NHL_LUKS_DEVICE:-}"
   local recoveryKey=""
@@ -1702,13 +1856,15 @@ nhl_run_luks_tpm_enrollment() {
   local tmpKeyFile=""
   local hashFile=""
   local hashFile512=""
+  local repoRoot=""
 
   if [ "${NHL_ENABLE_TPM_LUKS_ENROLL:-0}" != "1" ]; then
     return 0
   fi
 
+  # Re-resolve from the generated host hardware file if needed.
   if [ -z "$luksDevice" ]; then
-    luksDevice=$(nhl_extract_luks_device_from_hardware "$hostName" || true)
+    luksDevice=$(nhl_extract_luks_device_from_hardware "$hostName") || true
   fi
 
   if [ -z "$luksDevice" ]; then
@@ -1738,7 +1894,10 @@ nhl_run_luks_tpm_enrollment() {
     return 1
   fi
 
-  tmpKeyFile=$(mktemp)
+  tmpKeyFile=$(mktemp) || {
+    echo "${ERROR} Failed to create temporary recovery-key file."
+    return 1
+  }
 
   chmod 600 "$tmpKeyFile"
   printf "%s" "$recoveryKey" >"$tmpKeyFile"
@@ -1780,7 +1939,12 @@ nhl_run_luks_tpm_enrollment() {
     sha512sum |
     awk '{print $1}')
 
-  local recoveryDir="./.local-hosts/$hostName"
+  repoRoot=$(nhl_repo_root) || {
+    echo "${ERROR} Could not determine repository root while saving recovery-key hashes."
+    return 1
+  }
+
+  local recoveryDir="${repoRoot}/.local-hosts/${hostName}"
 
   mkdir -p "$recoveryDir"
 
