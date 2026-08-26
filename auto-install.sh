@@ -267,6 +267,19 @@ echo "$OK Machine-local host template is complete."
 
 # ===========================================================================
 # NORMALIZE MACHINE-LOCAL MODULE IMPORTS
+#
+# Machine-local config.nix resides at:
+#
+#   .local-host/<hostname>/config.nix
+#
+# Repository modules reside at:
+#
+#   modules/drivers
+#   modules/hardware
+#
+# Therefore the correct relative path is:
+#
+#   ../../modules/...
 # ===========================================================================
 
 machine_config="$hostDir/config.nix"
@@ -336,146 +349,90 @@ echo "-----"
 
 # ===========================================================================
 # KEYBOARD LAYOUT
+# ===========================================================================
 #
-# IMPORTANT:
+# Do NOT maintain a hardcoded alias list here.
 #
-# "de" is commonly used as a logical/layout name, but the console keymap
-# available to loadkeys may be "de-latin1".
+# The installer:
 #
-# We therefore:
+#   1. Accepts the user's requested keymap.
+#   2. Tries loadkeys directly.
+#   3. If that fails, discovers keymaps installed by kbd.
+#   4. Resolves an exact basename match.
+#   5. Validates the resolved keymap with loadkeys.
 #
-#   1. Normalize common aliases.
-#   2. Try loadkeys --parse.
-#   3. Search installed keymap directories.
-#   4. Store the actual working keymap.
-#
-# This prevents the installer from looping forever on:
-#
-#   Enter your keyboard layout: [ de ]
-#   Keyboard layout 'de' could not be verified...
+# This means the installer adapts to the actual kbd package installed on
+# the machine instead of assuming that names such as "de" are available.
 # ===========================================================================
 
 keyboardDefault="${NHL_STATE_KEYBOARD_LAYOUT:-de-latin1}"
 
 if ! command -v loadkeys >/dev/null 2>&1; then
     echo "${ERROR} loadkeys is required to validate keyboard layouts."
-    echo "${ERROR} Please ensure the kbd package is available."
     exit 1
 fi
 
 # ---------------------------------------------------------------------------
-# Resolve an installed console keymap.
+# Discover an installed keymap by basename.
+#
+# Examples:
+#
+#   /usr/share/keymaps/i386/qwerty/us.map.gz
+#       -> us
+#
+#   /usr/share/keymaps/i386/qwerty/de-latin1.map.gz
+#       -> de-latin1
+#
+# The function deliberately does not contain hardcoded aliases.
 # ---------------------------------------------------------------------------
-nhl_resolve_keyboard_layout() {
+nhl_resolve_installed_keymap() {
 
-    local requested="${1,,}"
-    local candidate
-    local keymap_dir
-    local keymap_file
+    local requested="$1"
+    local map_file
+    local map_name
+    local base_name
 
-    # Common aliases.
-    case "$requested" in
-        de)
-            requested="de-latin1"
-            ;;
-        de_DE)
-            requested="de-latin1"
-            ;;
-        german)
-            requested="de-latin1"
-            ;;
-        en)
-            requested="us"
-            ;;
-        en_US)
-            requested="us"
-            ;;
-        uk)
-            requested="uk"
-            ;;
-    esac
+    requested="${requested,,}"
 
-    # First try loadkeys' normal keymap search path.
-    if loadkeys --parse "$requested" >/dev/null 2>&1; then
-        printf '%s\n' "$requested"
-        return 0
+    # First look through the keymaps known to the kbd package.
+    if command -v kbd_mode >/dev/null 2>&1; then
+        :
     fi
 
-    # Search common keymap locations used by Linux/NixOS.
-    for keymap_dir in \
-        "/run/current-system/sw/share/keymaps" \
-        "/run/current-system/sw/share/kbd/keymaps" \
-        "/usr/share/keymaps" \
-        "/usr/share/kbd/keymaps" \
-        "/usr/share/console-setup"
+    while IFS= read -r map_file; do
 
-    do
+        [ -n "$map_file" ] || continue
 
-        [ -d "$keymap_dir" ] || continue
+        map_name="${map_file##*/}"
 
-        # Exact requested name.
-        for keymap_file in \
-            "$keymap_dir/$requested" \
-            "$keymap_dir/$requested.map" \
-            "$keymap_dir/$requested.map.gz" \
-            "$keymap_dir/$requested.bmap" \
-            "$keymap_dir/$requested.bmap.gz"
-        do
+        case "$map_name" in
+            *.map.gz)
+                base_name="${map_name%.map.gz}"
+                ;;
+            *.map)
+                base_name="${map_name%.map}"
+                ;;
+            *)
+                continue
+                ;;
+        esac
 
-            if [ -f "$keymap_file" ]; then
-
-                if loadkeys --parse "$keymap_file" >/dev/null 2>&1; then
-                    printf '%s\n' "$keymap_file"
-                    return 0
-                fi
-
-            fi
-
-        done
-
-        # Recursive lookup for layouts such as de-latin1.map.gz.
-        keymap_file="$(
-            find "$keymap_dir" \
-                -type f \
-                \( \
-                    -name "${requested}" \
-                    -o -name "${requested}.map" \
-                    -o -name "${requested}.map.gz" \
-                    -o -name "${requested}.bmap" \
-                    -o -name "${requested}.bmap.gz" \
-                \) \
-                -print -quit 2>/dev/null
-        )"
-
-        if [ -n "$keymap_file" ]; then
-
-            if loadkeys --parse "$keymap_file" >/dev/null 2>&1; then
-                printf '%s\n' "$keymap_file"
-                return 0
-            fi
-
+        if [ "${base_name,,}" = "$requested" ]; then
+            printf '%s\n' "$base_name"
+            return 0
         fi
 
-    done
+    done < <(
+        find \
+            /usr/share/keymaps \
+            /usr/lib/kbd/keymaps \
+            -type f \
+            \( -name '*.map' -o -name '*.map.gz' \) \
+            2>/dev/null \
+        | sort -u
+    )
 
     return 1
-}
-
-# ---------------------------------------------------------------------------
-# Convert an absolute keymap path back to a useful keymap identifier.
-# ---------------------------------------------------------------------------
-nhl_keyboard_layout_name() {
-
-    local resolved="$1"
-    local base
-
-    base="$(basename "$resolved")"
-
-    base="${base%.gz}"
-    base="${base%.map}"
-    base="${base%.bmap}"
-
-    printf '%s\n' "$base"
 }
 
 while true; do
@@ -506,38 +463,56 @@ while true; do
         keyboardLayout="$keyboardDefault"
     fi
 
-    resolved_keyboard_layout=""
+    # -----------------------------------------------------------------------
+    # First attempt: let loadkeys resolve the user's exact input.
+    # -----------------------------------------------------------------------
 
-    if resolved_keyboard_layout="$(
-        nhl_resolve_keyboard_layout "$keyboardLayout"
-    )"; then
+    if loadkeys --parse "$keyboardLayout" >/dev/null 2>&1; then
 
-        # If a path was returned, convert it to its keymap name.
-        if [[ "$resolved_keyboard_layout" == /* ]]; then
-            keyboardLayout="$(
-                nhl_keyboard_layout_name "$resolved_keyboard_layout"
-            )"
-        else
-            keyboardLayout="$resolved_keyboard_layout"
-        fi
-
-        echo "$OK Keyboard layout verified: $keyboardLayout"
+        echo "$OK Keyboard layout verified by loadkeys: $keyboardLayout"
         break
 
     fi
 
-    echo
+    # -----------------------------------------------------------------------
+    # Second attempt: discover an installed keymap with the same basename.
+    #
+    # No hardcoded alias table is used.
+    # -----------------------------------------------------------------------
+
+    resolvedKeyboardLayout="$(
+        nhl_resolve_installed_keymap "$keyboardLayout" \
+        2>/dev/null || true
+    )"
+
+    if [ -n "$resolvedKeyboardLayout" ] \
+        && loadkeys --parse "$resolvedKeyboardLayout" >/dev/null 2>&1; then
+
+        keyboardLayout="$resolvedKeyboardLayout"
+
+        echo "$OK Keyboard layout resolved to installed keymap: $keyboardLayout"
+        break
+
+    fi
+
     echo "${WARN} Keyboard layout '$keyboardLayout' could not be verified."
-    echo "${NOTE} Try one of the installed console keymaps."
-    echo "${NOTE} For German keyboards, use: de-latin1"
-    echo "${NOTE} Other examples: us, uk, fr, it, es, ru"
-    echo
+    echo "${NOTE} Enter a keymap provided by the installed kbd package."
+    echo "${NOTE} Example keymaps currently installed on this system:"
+
+    nhl_resolve_installed_keymap "$keyboardLayout" >/dev/null 2>&1 || true
+
+    find \
+        /usr/share/keymaps \
+        /usr/lib/kbd/keymaps \
+        -type f \
+        \( -name '*.map' -o -name '*.map.gz' \) \
+        2>/dev/null \
+        | sed -E 's#^.*/##; s/\.map(\.gz)?$//' \
+        | sort -u \
+        | head -20 \
+        | sed 's/^/    /'
 
 done
-
-# ===========================================================================
-# SAVE KEYBOARD LAYOUT
-# ===========================================================================
 
 variables_file="$hostDir/variables.nix"
 
@@ -553,7 +528,7 @@ fi
 if grep -qE '^[[:space:]]*keyboardLayout[[:space:]]*=' "$variables_file"; then
 
     sed -i \
-        's/^[[:space:]]*keyboardLayout[[:space:]]*=[[:space:]]*"[^"]*"/  keyboardLayout = "'"$keyboardLayout"'"/' \
+        's/^[[:space:]]*keyboardLayout[[:space:]]*=[[:space:]]*"[^"]*"/  keyboardLayout = "'"$keyboardLayout"'";/' \
         "$variables_file"
 
 else
@@ -672,6 +647,8 @@ fi
 
 # ===========================================================================
 # LUKS / TPM
+#
+# Machines without LUKS mappings are valid and skip TPM enrollment.
 # ===========================================================================
 
 if type nhl_prompt_luks_tpm_setup >/dev/null 2>&1; then
@@ -792,6 +769,13 @@ echo "$OK Machine-local host configuration is complete."
 
 # ===========================================================================
 # FLAKE VALIDATION
+#
+# The validation distinguishes between:
+#
+#   - a missing nixosConfigurations attribute
+#   - a configuration that exists but fails evaluation
+#
+# Machine-local files are included through the path-based flake reference.
 # ===========================================================================
 
 echo "-----"
@@ -950,7 +934,7 @@ if ! nix eval \
     echo
 
     echo "${WARN} Target:"
-    echo "    $flake_ref#$hostName"
+    echo "    $flake_ref#$flake_config"
 
     echo
 
