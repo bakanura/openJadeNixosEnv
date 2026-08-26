@@ -640,11 +640,11 @@ git config --global user.email "installer@gmail.com"
 git add "$gitignore_file"
 
 # ===========================================================================
-# DOWNLOAD ASSETS, THEMES & DOTFILES FIRST (BEFORE REBUILD)
+# STEP 1: DOWNLOAD ASSETS & CLONE REPOS FIRST (While network is active)
 # ===========================================================================
 
 printf "\n%.0s" {1..2}
-echo "$NOTE Downloading assets, themes, and configuration files while network is active..."
+echo "$NOTE Downloading assets and cloning repositories before rebuild..."
 echo "-----"
 
 # 1. ZSH CONFIGURATION
@@ -658,24 +658,11 @@ else
     echo "${WARN} assets/.zshrc was not found. Skipping."
 fi
 
-# 2. GTK THEMES AND ICONS
-printf "Installing GTK-Themes and Icons..\n"
+# 2. GTK THEMES AND ICONS (Clone only; extraction happens post-rebuild)
 if [ -d "$NHL_REPO_ROOT/GTK-themes-icons" ]; then
     rm -rf "$NHL_REPO_ROOT/GTK-themes-icons"
 fi
-
-if git clone --depth 1 https://github.com/JaKooLit/GTK-themes-icons.git "$NHL_REPO_ROOT/GTK-themes-icons"; then
-    cd "$NHL_REPO_ROOT/GTK-themes-icons"
-    chmod +x auto-extract.sh
-    if ./auto-extract.sh; then
-        echo "$OK Extracted GTK Themes & Icons to ~/.icons & ~/.themes directories"
-    else
-        echo "$ERROR GTK theme extraction failed."
-    fi
-    cd "$NHL_REPO_ROOT"
-else
-    echo "$ERROR Download failed for GTK themes and Icons.."
-fi
+git clone --depth 1 https://github.com/JaKooLit/GTK-themes-icons.git "$NHL_REPO_ROOT/GTK-themes-icons" || true
 
 # 3. USER CONFIG DIRECTORIES
 for DIR1 in gtk-3.0 Thunar xfce4; do
@@ -692,36 +679,18 @@ for DIR1 in gtk-3.0 Thunar xfce4; do
     fi
 done
 
-# 4. CLEAN GTK TEMPORARY DIRECTORY
-if [ -d "$NHL_REPO_ROOT/GTK-themes-icons" ]; then
-    rm -rf "$NHL_REPO_ROOT/GTK-themes-icons"
-fi
-
-# 5. HYPRLAND DOTS
-printf "$NOTE Downloading Hyprland-Dots to the home directory...\n"
+# 4. HYPRLAND DOTS (Clone/Pull from LinuxBeginnings; execution happens post-rebuild)
 if [ -d "$HOME/Hyprland-Dots" ]; then
     cd "$HOME/Hyprland-Dots"
     git stash || true
     git pull || true
-    chmod +x copy.sh
-    if ! ./copy.sh; then
-        echo "${WARN} Hyprland-Dots copy.sh returned an error."
-    fi
 else
-    if git clone --depth 1 https://github.com/JaKooLit/Hyprland-Dots "$HOME/Hyprland-Dots"; then
-        cd "$HOME/Hyprland-Dots"
-        chmod +x copy.sh
-        if ! ./copy.sh; then
-            echo "${WARN} Hyprland-Dots copy.sh returned an error."
-        fi
-    else
-        echo -e "$ERROR Failed to download Hyprland-Dots"
-    fi
+    git clone --depth 1 https://github.com/LinuxBeginnings/Hyprland-Dots "$HOME/Hyprland-Dots" || true
 fi
 
 cd "$NHL_REPO_ROOT" || exit 1
 
-# 6. FASTFETCH ASSETS
+# 5. FASTFETCH ASSETS
 if [ ! -f "$HOME/.config/fastfetch/nixos.png" ]; then
     if [ -d "$NHL_REPO_ROOT/assets/fastfetch" ]; then
         mkdir -p "$HOME/.config"
@@ -732,7 +701,7 @@ if [ ! -f "$HOME/.config/fastfetch/nixos.png" ]; then
 fi
 
 # ===========================================================================
-# REBUILD (NOW SAFE TO RUN)
+# STEP 2: NIXOS REBUILD (Happens BEFORE executing downloaded repo scripts)
 # ===========================================================================
 
 printf "\n%.0s" {1..2}
@@ -748,6 +717,41 @@ if ! sudo nixos-rebuild switch --flake "$flake_ref#$hostName"; then
 fi
 
 echo "$OK NixOS rebuild completed successfully."
+
+# ===========================================================================
+# STEP 3: RUN DOWNLOADED REPO SCRIPTS (Post-rebuild execution)
+# ===========================================================================
+
+printf "\n%.0s" {1..2}
+echo "$NOTE Executing downloaded repository scripts..."
+echo "-----"
+
+# Run GTK Themes and Icons extraction
+if [ -d "$NHL_REPO_ROOT/GTK-themes-icons" ]; then
+    cd "$NHL_REPO_ROOT/GTK-themes-icons"
+    chmod +x auto-extract.sh
+    if ./auto-extract.sh; then
+        echo "$OK Extracted GTK Themes & Icons to ~/.icons & ~/.themes directories"
+    else
+        echo "$ERROR GTK theme extraction failed."
+    fi
+    cd "$NHL_REPO_ROOT"
+fi
+
+# Clean GTK temporary directory
+if [ -d "$NHL_REPO_ROOT/GTK-themes-icons" ]; then
+    rm -rf "$NHL_REPO_ROOT/GTK-themes-icons"
+fi
+
+# Run Hyprland-Dots copy script
+if [ -d "$HOME/Hyprland-Dots" ]; then
+    cd "$HOME/Hyprland-Dots"
+    chmod +x copy.sh
+    if ! ./copy.sh; then
+        echo "${WARN} Hyprland-Dots copy.sh returned an error."
+    fi
+    cd "$NHL_REPO_ROOT" || exit 1
+fi
 
 # ===========================================================================
 # POST-REBUILD ENROLLMENTS & COMPLETION
